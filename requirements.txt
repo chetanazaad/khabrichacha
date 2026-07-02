@@ -1,0 +1,6 @@
+nicegui
+pyyaml
+loguru
+rich
+uvicorn
+watchdog
