@@ -4,3 +4,4 @@ loguru
 rich
 uvicorn
 watchdog
+duckduckgo-search
