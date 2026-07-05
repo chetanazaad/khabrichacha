@@ -15,9 +15,9 @@ class OpenAIProvider(BaseLLMProvider):
                 from openai import OpenAI
                 self.client = OpenAI(api_key=self.api_key)
             except ImportError:
-                logger.warning("openai package not installed. OpenAIProvider will run in mock mode.")
+                raise ValueError("openai package not installed. Cannot use OpenAIProvider.")
         else:
-            logger.warning("No API key provided for OpenAI. Running in mock mode.")
+            raise ValueError("No API key provided for OpenAI. Real model is required; mock mode has been disabled.")
 
     def generate(self, prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
         logger.info(f"OpenAI generate request with model {self.model}")

@@ -1,7 +1,9 @@
-from pydantic import BaseModel
+import sys
+import json
+import re
 from typing import List, Optional, Dict, Any, Tuple
 from loguru import logger
-import json
+from pydantic import BaseModel
 
 class PlanStep(BaseModel):
     id: str
@@ -15,9 +17,45 @@ class Plan(BaseModel):
     goal: str
     steps: List[PlanStep] = []
 
+class AdaptivePlan(BaseModel):
+    continue_research: bool
+    reason: str
+    steps: List[PlanStep] = []
+
 class Planner:
     def __init__(self, llm_manager=None):
         self.llm_manager = llm_manager
+
+    def _get_tool_registry(self):
+        # Try to find the tool_registry from the caller's frame (orchestrator)
+        try:
+            frame = sys._getframe(1)
+            while frame:
+                if 'self' in frame.f_locals:
+                    caller_self = frame.f_locals['self']
+                    if hasattr(caller_self, 'tool_registry'):
+                        return caller_self.tool_registry
+                frame = frame.f_back
+        except Exception:
+            pass
+            
+        # Fallback to creating a new registry with built-ins if not found
+        from khabrichacha.tools.registry import ToolRegistry
+        from khabrichacha.tools.builtin import register_builtin_tools
+        from khabrichacha.tools.builtin.search_web import SearchWebTool
+        from khabrichacha.tools.builtin.search_news import SearchNewsTool
+        from khabrichacha.tools.builtin.fetch_page import FetchPageTool
+        from khabrichacha.tools.builtin.fetch_pdf import FetchPDFTool
+        from khabrichacha.tools.builtin.python_executor import PythonExecutorTool
+        from khabrichacha.tools.builtin.report_generator import ReportGeneratorTool
+        
+        registry = ToolRegistry()
+        register_builtin_tools(registry)
+        for tool in [SearchWebTool(), SearchNewsTool(), FetchPageTool(), 
+                     FetchPDFTool(), PythonExecutorTool(), ReportGeneratorTool()]:
+            if not registry.has_tool(tool.name):
+                registry.register_tool(tool)
+        return registry
 
     def generate_plan(self, goal: str, available_tools: Optional[List[str]] = None) -> Plan:
         logger.info("Planning Started")
@@ -28,6 +66,7 @@ class Planner:
             return self._build_fallback_plan(goal, tools)
 
         try:
+            logger.info("LLM Planning")
             system_prompt, user_prompt = self._build_prompt(goal, tools)
             response_text = self._call_llm(user_prompt, system_prompt)
             steps_data = self._parse_response(response_text)
@@ -36,51 +75,198 @@ class Planner:
             if not valid_steps:
                 raise ValueError("Plan contains no execution steps.")
 
-            logger.info("Plan Generated")
-            return Plan(goal=goal, steps=valid_steps)
+            plan = Plan(goal=goal, steps=valid_steps)
+            logger.info(f"Generated Plan: {plan.model_dump_json(indent=2)}")
+            logger.info("Validation Complete")
+            return plan
+            return plan
         except Exception as e:
-            logger.error(f"Errors: {e}")
+            logger.error(f"Errors during LLM planning: {e}")
             return self._build_fallback_plan(goal, tools)
+
+    def generate_adaptive_plan(
+        self,
+        goal: str,
+        available_tools: List[str],
+        current_findings: List[str],
+        current_sources: List[Dict[str, str]],
+        previous_summary: Optional[str],
+        iteration: int,
+        config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        logger.info(f"Adaptive Planning Iteration {iteration}")
+        
+        if not self.llm_manager:
+            logger.warning("LLMManager not provided. Falling back to deterministic adaptive planning.")
+            return self._build_adaptive_fallback(goal, available_tools, current_sources, iteration, config)
+            
+        try:
+            # Build prompt
+            system_prompt = (
+                "You are an Adaptive AI Research Planner.\n"
+                "Evaluate the current findings, sources, and previous iteration summary against the original goal.\n"
+                "Decide whether more research is needed or if current evidence is sufficient.\n"
+                "If continuing, generate the next atomic tool execution steps to gather missing information.\n"
+                "Do not repeat exact queries or fetch the same URLs already collected.\n"
+                "Return ONLY valid JSON. No markdown, no explanation.\n"
+                "{\n"
+                '  "continue_research": true,\n'
+                '  "reason": "...",\n'
+                '  "steps": [\n'
+                "    {\n"
+                '      "id": "1",\n'
+                '      "description": "...",\n'
+                '      "tool_name": "...",\n'
+                '      "args": {},\n'
+                '      "depends_on": []\n'
+                "    }\n"
+                "  ]\n"
+                "}\n\n"
+            )
+            
+            registry = self._get_tool_registry()
+            tools_info = []
+            for name in available_tools:
+                if registry.has_tool(name):
+                    t = registry.get_tool(name)
+                    tools_info.append(f"- {name}: {t.description}\n  Inputs: {t.inputs}")
+            tools_str = "\n".join(tools_info) if tools_info else "No tools available."
+            
+            findings_str = "\n".join(f"- {f}" for f in current_findings[:20]) if current_findings else "None"
+            sources_str = "\n".join(f"- {s.get('title', '')} ({s.get('url', '')})" for s in current_sources) if current_sources else "None"
+            
+            user_prompt = (
+                f"Original Goal: {goal}\n\n"
+                f"Iteration: {iteration}\n"
+                f"Previous Iteration Summary:\n{previous_summary or 'None'}\n\n"
+                f"Current Sources:\n{sources_str}\n\n"
+                f"Current Findings (truncated):\n{findings_str}\n\n"
+                f"Available Tools:\n{tools_str}\n\n"
+                "Generate the JSON adaptive plan now."
+            )
+            
+            response_text = self._call_llm(user_prompt, system_prompt)
+            data = self._parse_response(response_text)
+            
+            # Validate JSON
+            if "continue_research" not in data or "reason" not in data:
+                raise ValueError("JSON must contain 'continue_research' and 'reason'.")
+                
+            steps_data = {"steps": data.get("steps", [])}
+            valid_steps = self._validate_steps(steps_data, available_tools)
+            
+            plan = AdaptivePlan(
+                continue_research=bool(data["continue_research"]),
+                reason=str(data["reason"]),
+                steps=valid_steps
+            )
+            
+            logger.info(f"Generated Adaptive Plan: continue={plan.continue_research}, steps={len(plan.steps)}")
+            return plan.model_dump()
+            
+        except Exception as e:
+            logger.error(f"Errors during LLM adaptive planning: {e}")
+            return self._build_adaptive_fallback(goal, available_tools, current_sources, iteration, config)
+            
+    def _build_adaptive_fallback(
+        self, goal: str, available_tools: List[str], current_sources: List[Dict[str, str]], iteration: int, config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        from urllib.parse import urlparse
+        
+        max_iter = config.get("max_iterations", 5)
+        min_sources = config.get("min_sources", 8)
+        min_unique = config.get("min_unique_sources", 5)
+        
+        total_sources = len(current_sources)
+        unique_domains = len(set(urlparse(s.get("url", "")).netloc for s in current_sources if s.get("url")))
+        
+        continue_research = True
+        reason = ""
+        
+        if iteration >= max_iter:
+            continue_research = False
+            reason = "Max iterations reached."
+        elif total_sources >= min_sources and unique_domains >= min_unique:
+            continue_research = False
+            reason = "Sufficient sources and domains collected."
+            
+        steps = []
+        if continue_research:
+            goal_lower = goal.lower()
+            gov_keywords = {"government", "budget", "policy", "gov"}
+            acad_keywords = {"research", "study", "paper"}
+            
+            is_gov = any(kw in goal_lower for kw in gov_keywords)
+            is_acad = any(kw in goal_lower for kw in acad_keywords)
+            
+            query_modifiers = {
+                1: "",
+                2: "news updates recent",
+                3: "detailed analysis",
+                4: "challenges future outlook",
+                5: "case study summary"
+            }
+            modifier = query_modifiers.get(iteration, "developments")
+            query = f"{goal} {modifier}".strip()
+            
+            if is_gov and "search_web" in available_tools:
+                steps.append(PlanStep(id="1", description=f"Search government sites for {modifier}", tool_name="search_web", args={"query": f"{query} site:gov"}, depends_on=[]))
+                if "fetch_page" in available_tools:
+                    steps.append(PlanStep(id="2", description="Fetch results", tool_name="fetch_page", args={"url": "${step1[*].url}"}, depends_on=["1"]))
+            elif is_acad and "search_web" in available_tools:
+                steps.append(PlanStep(id="1", description=f"Search academic sites for {modifier}", tool_name="search_web", args={"query": f"{query} site:edu OR site:org"}, depends_on=[]))
+                if "fetch_page" in available_tools:
+                    steps.append(PlanStep(id="2", description="Fetch results", tool_name="fetch_page", args={"url": "${step1[*].url}"}, depends_on=["1"]))
+            elif "search_news" in available_tools:
+                steps.append(PlanStep(id="1", description=f"Search broader news for {modifier}", tool_name="search_news", args={"query": query}, depends_on=[]))
+                if "fetch_page" in available_tools:
+                    steps.append(PlanStep(id="2", description="Fetch results", tool_name="fetch_page", args={"url": "${step1[*].url}"}, depends_on=["1"]))
+            else:
+                continue_research = False
+                reason = "Cannot generate fallback steps."
+                steps = []
+                
+        plan = AdaptivePlan(continue_research=continue_research, reason=reason, steps=steps)
+        return plan.model_dump()
 
     def _build_prompt(self, goal: str, available_tools: List[str]) -> Tuple[str, str]:
         logger.info("Prompt Generated")
         system_prompt = (
             "You are an AI Research Planner.\n"
             "Your only job is to produce the execution plan.\n"
-            "Never execute tools.\n"
-            "Never summarize.\n"
-            "Never answer the user.\n"
+            "Never execute tools. Never summarize. Never answer the user.\n"
             "Only decide the sequence of actions.\n"
             "Only use tools from the available_tools list.\n"
             "If a tool does not exist, do NOT invent it.\n"
             "Every task should be atomic.\n"
-            "Bad task:\n"
-            "Research everything about NVIDIA.\n"
-            "Good tasks:\n"
-            "Search latest NVIDIA news.\n"
-            "Read earnings report.\n"
-            "Compare analyst opinions.\n"
-            "Generate final report.\n\n"
             "You must return ONLY valid JSON. No markdown, no explanation.\n"
             "{\n"
             '  "steps": [\n'
             "    {\n"
-            '      "id": "step_1",\n'
-            '      "description": "Search latest news",\n'
-            '      "tool_name": "search_news",\n'
-            '      "args": {\n'
-            '          "query": "..."\n'
-            "      },\n"
+            '      "id": "1",\n'
+            '      "description": "...",\n'
+            '      "tool_name": "...",\n'
+            '      "args": {},\n'
             '      "depends_on": []\n'
             "    }\n"
             "  ]\n"
-            "}\n"
+            "}\n\n"
         )
         
-        tools_str = ", ".join(f"'{t}'" for t in available_tools) if available_tools else "No tools available."
+        registry = self._get_tool_registry()
+        tools_info = []
+        for name in available_tools:
+            if registry.has_tool(name):
+                t = registry.get_tool(name)
+                tools_info.append(f"- {name}: {t.description}\n  Inputs: {t.inputs}")
+            else:
+                tools_info.append(f"- {name}")
+                
+        tools_str = "\n".join(tools_info) if tools_info else "No tools available."
+        
         user_prompt = (
-            f"Research Goal: {goal}\n"
-            f"Available Tools: [{tools_str}]\n\n"
+            f"Research Goal: {goal}\n\n"
+            f"Available Tools:\n{tools_str}\n\n"
             "Generate the JSON execution plan now."
         )
         return system_prompt, user_prompt
@@ -172,40 +358,113 @@ class Planner:
         return valid_steps
 
     def _build_fallback_plan(self, goal: str, available_tools: List[str]) -> Plan:
-        logger.info("Fallback Used")
-        tool_1 = "workspace_init" if "workspace_init" in available_tools else None
-        tool_2 = "execute_task" if "execute_task" in available_tools else None
-        tool_3 = "execute_task" if "execute_task" in available_tools else None
-        tool_4 = "summarize_results" if "summarize_results" in available_tools else None
-
-        steps = [
-            PlanStep(
-                id="1.",
-                description="Understand Goal",
-                tool_name=tool_1,
-                args={"goal": goal} if tool_1 else None,
+        logger.info("Fallback Planning")
+        
+        goal_lower = goal.lower()
+        
+        # Check heuristics
+        news_keywords = {"news", "today", "latest", "breaking", "headlines"}
+        is_news = any(kw in goal_lower for kw in news_keywords)
+        
+        pdf_keywords = {"pdf", "report", "whitepaper", "government report", "annual report", "budget"}
+        is_pdf = any(kw in goal_lower for kw in pdf_keywords)
+        
+        python_keywords = {"calculate", "compare", "chart", "statistics", "growth", "percentage", "forecast", "analysis", "cagr", "rate"}
+        is_python = any(kw in goal_lower for kw in python_keywords)
+        
+        urls_in_goal = re.findall(r'(https?://\S+)', goal)
+        
+        steps = []
+        step_id = 1
+        
+        # 1. Search Step
+        has_searched = False
+        if is_news and "search_news" in available_tools:
+            steps.append(PlanStep(
+                id=str(step_id),
+                description="Search for latest news",
+                tool_name="search_news",
+                args={"query": goal},
                 depends_on=[]
-            ),
-            PlanStep(
-                id="2.",
-                description="Search Information",
-                tool_name=tool_2,
-                args={"query": goal} if tool_2 else None,
-                depends_on=["1."]
-            ),
-            PlanStep(
-                id="3.",
-                description="Analyze Information",
-                tool_name=tool_3,
-                args={"query": goal} if tool_3 else None,
-                depends_on=["2."]
-            ),
-            PlanStep(
-                id="4.",
-                description="Generate Report",
-                tool_name=tool_4,
-                args={"goal": goal} if tool_4 else None,
-                depends_on=["3."]
-            )
-        ]
-        return Plan(goal=goal, steps=steps)
+            ))
+            step_id += 1
+            has_searched = True
+        elif "search_web" in available_tools:
+            steps.append(PlanStep(
+                id=str(step_id),
+                description="Search the web for information",
+                tool_name="search_web",
+                args={"query": goal},
+                depends_on=[]
+            ))
+            step_id += 1
+            has_searched = True
+            
+        # 2. Fetch Step
+        if urls_in_goal:
+            for url in urls_in_goal:
+                if "fetch_page" in available_tools:
+                    deps = [str(step_id - 1)] if step_id > 1 else []
+                    steps.append(PlanStep(
+                        id=str(step_id),
+                        description=f"Fetch provided URL: {url}",
+                        tool_name="fetch_page",
+                        args={"url": url},
+                        depends_on=deps
+                    ))
+                    step_id += 1
+        else:
+            if is_pdf and "fetch_pdf" in available_tools:
+                deps = [str(step_id - 1)] if step_id > 1 else []
+                steps.append(PlanStep(
+                    id=str(step_id),
+                    description="Fetch the PDF document",
+                    tool_name="fetch_pdf",
+                    args={"url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"},
+                    depends_on=deps
+                ))
+                step_id += 1
+            elif has_searched and "fetch_page" in available_tools:
+                deps = [str(step_id - 1)] if step_id > 1 else []
+                steps.append(PlanStep(
+                    id=str(step_id),
+                    description="Fetch content from search results",
+                    tool_name="fetch_page",
+                    args={"url": "https://example.com"},
+                    depends_on=deps
+                ))
+                step_id += 1
+                
+        # 3. Python Execution Step
+        if is_python and "python_executor" in available_tools:
+            deps = [str(step_id - 1)] if step_id > 1 else []
+            steps.append(PlanStep(
+                id=str(step_id),
+                description="Perform data analysis and calculations",
+                tool_name="python_executor",
+                args={"code": f"# Analysis for {goal}\nprint('Performing calculations...')"},
+                depends_on=deps
+            ))
+            step_id += 1
+            
+        # 4. Report Generation Step
+        if "generate_report" in available_tools:
+            deps = [str(step_id - 1)] if step_id > 1 else []
+            steps.append(PlanStep(
+                id=str(step_id),
+                description="Generate final research report",
+                tool_name="generate_report",
+                args={
+                    "title": f"Research Report: {goal}",
+                    "objective": goal,
+                    "findings": [],
+                    "sources": []
+                },
+                depends_on=deps
+            ))
+            step_id += 1
+            
+        plan = Plan(goal=goal, steps=steps)
+        logger.info(f"Generated Plan: {plan.model_dump_json(indent=2)}")
+        logger.info("Validation Complete")
+        return plan

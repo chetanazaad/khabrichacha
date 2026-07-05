@@ -10,6 +10,16 @@ class Session:
         self.session_id = session_id or str(uuid4())
         self.config = self._load_config(config_path)
         self.state = State(session_id=self.session_id)
+        self.runtime = {}
+        self.research_state = {
+            "iteration": 0,
+            "completed": False,
+            "total_sources": 0,
+            "unique_domains": 0,
+            "findings": [],
+            "coverage": "0%",
+            "outstanding_questions": []
+        }
         
         system_prompt = self.config.get("llm", {}).get(
             "system_prompt", 

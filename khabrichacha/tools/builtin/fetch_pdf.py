@@ -35,26 +35,40 @@ class FetchPDFTool(BaseTool):
     def supports_streaming(self) -> bool:
         return False
 
-    def execute(self, arguments: Dict[str, Any]) -> Dict[str, Union[str, int]]:
+    def execute(self, arguments: Dict[str, Any]) -> Any:
+        """
+        Downloads one or more PDFs into memory and extracts text using PyMuPDF (fitz).
+        """
+        logger.info("FetchPDFTool execution started.")
+        
+        urls = arguments.get("url")
+        if not urls:
+            error_msg = "Missing or empty 'url' argument."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        if isinstance(urls, list):
+            results = []
+            for u in urls:
+                url_str = u.get("url") if isinstance(u, dict) else str(u)
+                results.append(self._fetch_single(url_str))
+            return results
+        else:
+            url_str = urls.get("url") if isinstance(urls, dict) else str(urls)
+            return self._fetch_single(url_str)
+
+    def _fetch_single(self, url: str) -> Dict[str, Union[str, int]]:
         """
         Downloads a PDF into memory and extracts text using PyMuPDF (fitz).
         """
         logger.info("FetchPDFTool execution started.")
         
         default_return = {
-            "url": "",
+            "url": url,
             "title": "",
             "pages": 0,
             "content": ""
         }
-
-        if "url" not in arguments or not arguments["url"]:
-            error_msg = "Missing or empty 'url' argument."
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-
-        url = str(arguments["url"])
-        default_return["url"] = url
         
         logger.info(f"Fetching PDF from URL: '{url}'")
 

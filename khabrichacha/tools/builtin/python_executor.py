@@ -150,10 +150,19 @@ class PythonExecutorTool(BaseTool):
             else:
                 stderr_str = traceback_str
 
+        # Extract primitive local variables for use in subsequent tools
+        extracted_locals = {}
+        for k, v in restricted_locals.items():
+            if not k.startswith("_") and isinstance(v, (str, int, float, bool, list, dict)):
+                extracted_locals[k] = v
+
         logger.info(f"Python execution finished. Success: {success}")
         
-        return {
+        result = {
             "success": success,
             "stdout": stdout_str,
-            "stderr": stderr_str
+            "stderr": stderr_str,
+            "variables": extracted_locals
         }
+        result.update(extracted_locals)
+        return result

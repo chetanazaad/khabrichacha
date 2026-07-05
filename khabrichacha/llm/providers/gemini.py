@@ -16,9 +16,9 @@ class GeminiProvider(BaseLLMProvider):
                 genai.configure(api_key=self.api_key)
                 self.client = genai
             except ImportError:
-                logger.warning("google-generativeai package not installed. GeminiProvider will run in mock mode.")
+                raise ValueError("google-generativeai package not installed. Cannot use GeminiProvider.")
         else:
-            logger.warning("No API key provided for Gemini. Running in mock mode.")
+            raise ValueError("No API key provided for Gemini. Real model is required; mock mode has been disabled.")
 
     def generate(self, prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
         logger.info(f"Gemini generate request with model {self.model_name}")

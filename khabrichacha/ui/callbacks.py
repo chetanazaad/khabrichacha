@@ -15,6 +15,10 @@ async def run_research(goal: str, model: str, depth: str, sources: int):
         ui.notify("Please enter a research mission objective.", type="warning")
         return
 
+    if not model:
+        ui.notify("Please select a model before running.", type="warning")
+        return
+
     # Create Session
     session = Session()
 

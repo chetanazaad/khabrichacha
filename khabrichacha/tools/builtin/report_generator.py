@@ -26,7 +26,7 @@ class ReportGeneratorTool(BaseTool):
 
     @property
     def inputs(self) -> List[str]:
-        return ["title", "objective", "findings", "sources"]
+        return ["title", "objective", "findings", "sources", "evidence"]
 
     @property
     def outputs(self) -> List[str]:
@@ -53,6 +53,7 @@ class ReportGeneratorTool(BaseTool):
         objective = arguments["objective"]
         findings = arguments["findings"]
         sources = arguments["sources"]
+        evidence = arguments.get("evidence")
         
         # Type validations
         if not isinstance(title, str) or not title.strip():
@@ -116,6 +117,11 @@ class ReportGeneratorTool(BaseTool):
         else:
             lines.append("No sources provided.")
         lines.append("")
+
+        if evidence:
+            lines.append("## Evidence")
+            lines.append(str(evidence))
+            lines.append("")
         
         # Research Statistics
         generated_timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
