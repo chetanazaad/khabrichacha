@@ -48,6 +48,11 @@ def get_custom_css() -> str:
         color: #34d399;
         border: 1px solid rgba(52, 211, 153, 0.4);
     }
+    .status-running {
+        background: rgba(245, 158, 11, 0.2);
+        color: #fbbf24;
+        border: 1px solid rgba(251, 191, 36, 0.4);
+    }
 
     /* ----- Navigation ----- */
     .nav-btn {

@@ -4,7 +4,7 @@ Binds brand palette, loads custom CSS, and builds the layout grid.
 The server is started from app.py to satisfy NiceGUI's main-module check.
 """
 
-from nicegui import ui
+from nicegui import ui, app
 from khabrichacha.ui.theme import get_custom_css
 from khabrichacha.ui.components import build_layout
 
@@ -14,4 +14,21 @@ def index_page():
     build_layout()
 
 def start_application():
-    pass
+    @app.on_startup
+    def startup():
+        import asyncio
+        import khabrichacha.ui.ui_state as ui_state
+        from loguru import logger
+        
+        # Capture the running event loop of the main thread
+        ui_state.main_loop = asyncio.get_running_loop()
+        
+        # Configure custom loguru sink to update the NiceGUI log component
+        def ui_log_sink(message):
+            if ui_state.log_view:
+                try:
+                    ui_state.main_loop.call_soon_threadsafe(ui_state.log_view.push, message.rstrip())
+                except Exception:
+                    pass
+        
+        logger.add(ui_log_sink, format="{time:HH:mm:ss} | {level:7} | {message}")
