@@ -19,7 +19,33 @@ def build_layout():
             _build_right_panel()
 
 
-MOCK_PROJECTS = ["AI Chips", "India Budget", "NVIDIA", "Iran", "Taiwan"]
+def _get_project_list():
+    """Load projects from ProjectManager; fall back to empty list."""
+    try:
+        from deployment.config_loader import load_config
+        from deployment.workspace.workspace_manager import WorkspaceManager
+        from deployment.workspace.project_manager import ProjectManager
+        config = load_config()
+        ws = WorkspaceManager(config.workspace.root)
+        pm = ProjectManager(ws)
+        return pm.list_projects()
+    except Exception:
+        return []
+
+
+def _get_model_options():
+    """Discover available models from ProviderManager; fall back to defaults."""
+    try:
+        from khabrichacha.providers.provider_manager import ProviderManager
+        from deployment.config_loader import load_config
+        config = load_config()
+        pm = ProviderManager(config.model_dump())
+        options = pm.get_available_models()
+        if options:
+            return options
+    except Exception as e:
+        print(f"Error getting model options: {e}")
+    return ["openai/gpt-4o", "gemini/gemini-2.0-flash", "ollama/llama3"]
 PROVIDERS = [
     ("Web", True),
     ("News", True),
@@ -64,9 +90,45 @@ def _build_left_nav():
         ui.html('<hr class="border-gray-700 my-2">')
         ui.html('<div class="text-xs text-gray-500 font-semibold px-2 mb-1">\U0001f4c2 WORKSPACE</div>')
         with ui.expansion("Projects", icon="folder").classes("w-full text-sm text-gray-300"):
-            for proj in MOCK_PROJECTS:
-                pbtn = ui.button(proj, on_click=lambda p=proj: load_project(p))
-                pbtn.classes("nav-btn text-xs pl-4")
+            projects = _get_project_list()
+            if projects:
+                for proj in projects:
+                    display = proj.title or proj.project_id
+                    pbtn = ui.button(display, on_click=lambda pid=proj.project_id: load_project(pid))
+                    pbtn.classes("nav-btn text-xs pl-4")
+            else:
+                ui.label("No projects yet").classes("text-xs text-gray-500 px-2")
+
+        ui.html('<hr class="border-gray-700 my-2">')
+        ui.html('<div class="text-xs text-gray-500 font-semibold px-2 mb-1">\u26a1 SYSTEM STATUS</div>')
+        _build_system_status()
+
+def _build_system_status():
+    """Builds a small panel showing provider health."""
+    try:
+        from khabrichacha.providers.provider_manager import ProviderManager
+        from deployment.config_loader import load_config
+        config = load_config()
+        pm = ProviderManager(config.model_dump())
+        providers = pm.discover_providers()
+        
+        with ui.column().classes("w-full px-2 py-1 bg-gray-800 rounded text-xs gap-1"):
+            for p_name, data in providers.items():
+                if data["available"]:
+                    icon, color = "\U0001f7e2", "text-green-400"
+                    text = f"{p_name} ({len(data['models'])} models)"
+                elif data["configured"] and not data["available"]:
+                    icon, color = "\U0001f7e0", "text-orange-400"
+                    text = f"{p_name} (error)"
+                else:
+                    icon, color = "\u26aa", "text-gray-500"
+                    text = f"{p_name} (unconfigured)"
+                    
+                with ui.row().classes("w-full items-center justify-between"):
+                    ui.label(text).classes(f"{color}")
+                    ui.label(icon).classes("text-[10px]")
+    except Exception as e:
+        ui.label(f"Status error: {e}").classes("text-xs text-red-500 px-2")
 
 
 def _build_mission_panel():
@@ -84,10 +146,11 @@ def _build_mission_panel():
                 cb.classes("text-sm text-gray-300 provider-cb")
 
         with ui.row().classes("w-full gap-4 mt-1"):
+            model_options = _get_model_options()
             ui_state.model_select = ui.select(
                 label="Model",
-                options=["gpt-4", "gpt-3.5-turbo", "gemini-pro", "claude-3", "ollama/llama3"],
-                value="gpt-4",
+                options=model_options,
+                value=model_options[0] if model_options else "gpt-4",
             ).classes("flex-1")
 
             ui_state.depth_select = ui.select(

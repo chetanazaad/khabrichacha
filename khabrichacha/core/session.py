@@ -29,6 +29,20 @@ class Session:
         logger.info(f"Initialized Session: {self.session_id}")
 
     def _load_config(self, path: str) -> dict:
+        """
+        Load configuration using the deployment config loader when available,
+        falling back to direct YAML loading for backward compatibility.
+        """
+        # Try the deployment config loader first (no platform-specific logic here)
+        try:
+            from deployment.config_loader import load_config
+            config_obj = load_config()
+            logger.info("Configuration loaded via deployment.config_loader.")
+            return config_obj.to_legacy_dict()
+        except Exception:
+            pass
+
+        # Fallback: direct YAML loading (backward compat)
         config_file = Path(path)
         if config_file.exists():
             try:

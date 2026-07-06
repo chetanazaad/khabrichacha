@@ -55,7 +55,7 @@ class SearchWebTool(BaseTool):
         try:
             from duckduckgo_search import DDGS
             with DDGS() as ddgs:
-                results = ddgs.text(query, max_results=max_results)
+                results = ddgs.text(query, max_results=max_results, backend="lite")
                 for r in results:
                     results_formatted.append({
                         "title": r.get("title", ""),

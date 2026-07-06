@@ -32,3 +32,6 @@ PyYAML>=6.0.1
 
 # Development
 pytest>=8.0.0
+
+# Report Export
+reportlab>=4.0.0
