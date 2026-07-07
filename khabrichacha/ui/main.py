@@ -24,10 +24,20 @@ def start_application():
         ui_state.main_loop = asyncio.get_running_loop()
         
         # Configure custom loguru sink to update the NiceGUI log component
+        def safe_push(text):
+            try:
+                if ui_state.log_view:
+                    ui_state.log_view.push(text)
+            except RuntimeError as e:
+                if "deleted" in str(e):
+                    ui_state.log_view = None
+            except Exception:
+                pass
+
         def ui_log_sink(message):
             if ui_state.log_view:
                 try:
-                    ui_state.main_loop.call_soon_threadsafe(ui_state.log_view.push, message.rstrip())
+                    ui_state.main_loop.call_soon_threadsafe(safe_push, message.rstrip())
                 except Exception:
                     pass
         
