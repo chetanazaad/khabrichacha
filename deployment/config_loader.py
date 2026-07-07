@@ -95,6 +95,10 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
             merged[key] = value
     return merged
 
+# ── Singleton Cache ──────────────────────────────────────────
+
+_cached_config: Optional[KhabriChachaConfig] = None
+
 # ── Public API ───────────────────────────────────────────────
 
 _CONFIG_DIR = Path(__file__).resolve().parent
@@ -111,7 +115,15 @@ def load_config(environment: Optional[str] = None) -> KhabriChachaConfig:
     1. Load deployment/base_config.yaml
     2. Merge deployment/<environment>.yaml on top
     3. Validate via Pydantic
+
+    Results are cached after first load; subsequent calls return the same instance.
+    Use reload_config() to force a fresh load.
     """
+    global _cached_config
+    if _cached_config is not None:
+        logger.debug("Returning cached configuration.")
+        return _cached_config
+
     env = environment or detect_environment()
     base_path = _CONFIG_DIR / "base_config.yaml"
     env_path = _CONFIG_DIR / f"{env}.yaml"
@@ -139,8 +151,16 @@ def load_config(environment: Optional[str] = None) -> KhabriChachaConfig:
     try:
         config = KhabriChachaConfig.model_validate(merged)
         config._raw = merged
+        _cached_config = config
         logger.info(f"Configuration validated successfully for environment '{env}'.")
         return config
     except Exception as e:
         logger.error(f"Configuration validation failed: {e}")
         raise
+
+
+def reload_config(environment: Optional[str] = None) -> KhabriChachaConfig:
+    """Clear the cached configuration and reload from disk."""
+    global _cached_config
+    _cached_config = None
+    return load_config(environment)

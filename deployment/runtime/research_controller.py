@@ -18,6 +18,7 @@ from deployment.runtime.models.research_request import ResearchRequest
 from deployment.runtime.models.research_result import ResearchResult
 from deployment.runtime.models.research_statistics import ResearchStatistics
 from deployment.runtime.models.error_info import ErrorInfo
+from deployment.config_loader import load_config
 from deployment.runtime.event_bus import EventBus
 from deployment.runtime.tool_executor import ToolExecutor
 from deployment.workspace.workspace_manager import WorkspaceManager
@@ -69,6 +70,36 @@ class ResearchController:
         t0 = time.time()
         self.event_bus = event_bus or EventBus()
         profiler.record_init("EventBus", "ResearchController", "Injected or Created", (time.time() - t0) * 1000)
+
+        # Singleton ToolRegistry — all tools registered once at init
+        t0 = time.time()
+        self._tool_registry = ToolRegistry()
+        from khabrichacha.tools.builtin.search_web import SearchWebTool
+        from khabrichacha.tools.builtin.search_news import SearchNewsTool
+        from khabrichacha.tools.builtin.fetch_page import FetchPageTool
+        self._tool_registry.register_tool(SearchWebTool())
+        self._tool_registry.register_tool(SearchNewsTool())
+        self._tool_registry.register_tool(FetchPageTool())
+        profiler.record_init("ToolRegistry", "ResearchController", "Singleton", (time.time() - t0) * 1000)
+
+        # Singleton LLMManager — one instance shared across all lightweight handlers
+        t0 = time.time()
+        config = load_config()
+        self._llm_config = config.to_legacy_dict()
+        self._llm_manager = LLMManager(self._llm_config)
+        profiler.record_init("LLMManager", "ResearchController", "Singleton", (time.time() - t0) * 1000)
+
+    def _get_provider(self, request: ResearchRequest):
+        """Get a validated LLM provider for the given request, using the singleton LLMManager."""
+        if "providers" not in self._llm_config:
+            self._llm_config["providers"] = {}
+        self._llm_config["providers"][request.provider] = {"model": request.model}
+
+        provider_obj = self._llm_manager.get_provider(request.provider)
+        actual_model = getattr(provider_obj, "model", None) or getattr(provider_obj, "model_name", None)
+        if actual_model != request.model:
+            raise ValueError(f"Model mismatch: requested '{request.model}', but provider instantiated '{actual_model}'")
+        return provider_obj
 
     def enforce_prompt_budget(self, prompt: str, max_tokens: int) -> str:
         # safe approximation: 1 token ≈ 4 characters.
@@ -173,6 +204,11 @@ class ResearchController:
         
         tracer = ExecutionTraceRecorder()
         tracer.set_query_info(request.mission, strategy.strategy_name, strategy.confidence, strategy.complexity)
+        tracer.record_runtime_info(
+            config_source="cached",
+            tool_registry_source="singleton",
+            session_created=strategy.strategy_name in ("RESEARCH", "DEEP_RESEARCH"),
+        )
         tracer.record_module("QueryClassifier", class_time * 1000)
         
         self.event_bus.info("Classifier", f"Query classified. Strategy: {strategy.strategy_name} (Confidence: {strategy.confidence:.0%})")
@@ -212,7 +248,7 @@ class ResearchController:
             
             # Post-execution Quality Evaluation
             from deployment.runtime.intelligence.quality_evaluator import QualityEvaluator
-            qe = QualityEvaluator()
+            qe = QualityEvaluator(llm_manager=self._llm_manager)
             scores = qe.evaluate(
                 query=request.mission,
                 answer=final_result.direct_answer or "",
@@ -228,14 +264,14 @@ class ResearchController:
             
             # Auto-Regeneration logic
             if scores.get("overall_score", 100) < 80.0 and strategy.strategy_name != "DEEP_RESEARCH" and not request.metadata.get("auto_regenerated"):
-                self.event_bus.warning("Controller", f"Low quality score ({scores.get('overall_score')}/100). Auto-regenerating with higher strategy...")
+                self.event_bus.warn("Controller", f"Low quality score ({scores.get('overall_score')}/100). Auto-regenerating with higher strategy...")
                 request.metadata["auto_regenerated"] = True
                 # Escalate strategy
                 new_strat = "RESEARCH" if strategy.strategy_name in ["FAST", "LOOKUP", "ANALYSIS"] else "DEEP_RESEARCH"
                 request.strategy_override = new_strat
                 return self.start_research(request)
             elif scores.get("overall_score", 100) < 80.0:
-                self.event_bus.warning("Controller", f"Final answer quality score is low ({scores.get('overall_score')}/100). Adding warning to answer.")
+                self.event_bus.warn("Controller", f"Final answer quality score is low ({scores.get('overall_score')}/100). Adding warning to answer.")
                 if final_result.direct_answer:
                     final_result.direct_answer += f"\n\n> [!WARNING]\n> The generated answer has a low confidence/quality score ({scores.get('overall_score')}/100) and might be incomplete or hallucinated."
 
@@ -323,17 +359,7 @@ class ResearchController:
             return result
 
         # 2. LLM reasoning query
-        session = Session()
-        if "providers" not in session.config:
-            session.config["providers"] = {}
-        session.config["providers"][request.provider] = {"model": request.model}
-        llm_manager = LLMManager(session.config)
-        provider_obj = llm_manager.get_provider(request.provider)
-        
-        # Model Verification
-        actual_model = getattr(provider_obj, "model", None) or getattr(provider_obj, "model_name", None)
-        if actual_model != request.model:
-            raise ValueError(f"Model mismatch: requested '{request.model}', but provider instantiated '{actual_model}'")
+        provider_obj = self._get_provider(request)
 
         # Prompt budget for FAST is 500 tokens
         prompt = f"Provide a concise, direct answer to the following question:\n{request.mission}"
@@ -358,13 +384,7 @@ class ResearchController:
         self._setup_session(request, strategy, result, tracer)
 
         retRetrieval_start = time.time()
-        registry = ToolRegistry()
-        from khabrichacha.tools.builtin.search_web import SearchWebTool
-        from khabrichacha.tools.builtin.search_news import SearchNewsTool
-        from khabrichacha.tools.builtin.fetch_page import FetchPageTool
-        registry.register_tool(SearchWebTool())
-        registry.register_tool(SearchNewsTool())
-        registry.register_tool(FetchPageTool())
+        registry = self._tool_registry
         
         # 1. Search Local cache/workspace memory first
         kr = KnowledgeRetriever(self.workspace_manager)
@@ -410,17 +430,7 @@ class ResearchController:
             )
             prompt = self.enforce_prompt_budget(prompt, 1000)
             
-            session = Session()
-            if "providers" not in session.config:
-                session.config["providers"] = {}
-            session.config["providers"][request.provider] = {"model": request.model}
-            llm_manager = LLMManager(session.config)
-            provider_obj = llm_manager.get_provider(request.provider)
-            
-            actual_model = getattr(provider_obj, "model", None) or getattr(provider_obj, "model_name", None)
-            if actual_model != request.model:
-                raise ValueError(f"Model mismatch: requested '{request.model}', but provider instantiated '{actual_model}'")
-                
+            provider_obj = self._get_provider(request)
             ans = provider_obj.generate(prompt)
             tracer.record_llm_call(request.provider, request.model, len(prompt)/4, len(ans)/4)
             
@@ -480,17 +490,7 @@ class ResearchController:
             1000
         )
         
-        session = Session()
-        if "providers" not in session.config:
-            session.config["providers"] = {}
-        session.config["providers"][request.provider] = {"model": request.model}
-        llm_manager = LLMManager(session.config)
-        provider_obj = llm_manager.get_provider(request.provider)
-        
-        actual_model = getattr(provider_obj, "model", None) or getattr(provider_obj, "model_name", None)
-        if actual_model != request.model:
-            raise ValueError(f"Model mismatch: requested '{request.model}', but provider instantiated '{actual_model}'")
-            
+        provider_obj = self._get_provider(request)
         ans = provider_obj.generate(prompt)
         tracer.record_llm_call(request.provider, request.model, len(prompt)/4, len(ans)/4)
 
@@ -517,11 +517,7 @@ class ResearchController:
         self._setup_session(request, strategy, result, tracer)
         
         # 1. Run Search & Fetch
-        registry = ToolRegistry()
-        from khabrichacha.tools.builtin.search_web import SearchWebTool
-        from khabrichacha.tools.builtin.fetch_page import FetchPageTool
-        registry.register_tool(SearchWebTool())
-        registry.register_tool(FetchPageTool())
+        registry = self._tool_registry
         
         ret_start = time.time()
         retriever = Retriever(registry, strategy)
@@ -595,18 +591,7 @@ class ResearchController:
                 self.enforce_adaptive_prompt_budget(request.mission, snippets, instructions, 2000),
                 2000
             )
-            session = Session()
-            if "providers" not in session.config:
-                session.config["providers"] = {}
-            session.config["providers"][request.provider] = {"model": request.model}
-            llm_manager = LLMManager(session.config)
-            provider_obj = llm_manager.get_provider(request.provider)
-            
-            # Model Verification
-            actual_model = getattr(provider_obj, "model", None) or getattr(provider_obj, "model_name", None)
-            if actual_model != request.model:
-                raise ValueError(f"Model mismatch: requested '{request.model}', but provider instantiated '{actual_model}'")
-                
+            provider_obj = self._get_provider(request)
             ans = provider_obj.generate(prompt)
             tracer.record_llm_call(request.provider, request.model, len(prompt)/4, len(ans)/4)
 
@@ -643,11 +628,7 @@ class ResearchController:
         dq = decomposer.decompose(request.mission, strategy)
         
         # Parallel searches for both entities
-        registry = ToolRegistry()
-        from khabrichacha.tools.builtin.search_web import SearchWebTool
-        from khabrichacha.tools.builtin.fetch_page import FetchPageTool
-        registry.register_tool(SearchWebTool())
-        registry.register_tool(FetchPageTool())
+        registry = self._tool_registry
         
         findings = []
         retrieved_sources = []
@@ -672,17 +653,7 @@ class ResearchController:
         tracer.record_retrieval(len(retrieved_sources), 0, 0, 0, 0, [])
                     
         # LLM Reasoning comparison synthesis
-        session = Session()
-        if "providers" not in session.config:
-            session.config["providers"] = {}
-        session.config["providers"][request.provider] = {"model": request.model}
-        llm_manager = LLMManager(session.config)
-        provider_obj = llm_manager.get_provider(request.provider)
-        
-        # Model Verification
-        actual_model = getattr(provider_obj, "model", None) or getattr(provider_obj, "model_name", None)
-        if actual_model != request.model:
-            raise ValueError(f"Model mismatch: requested '{request.model}', but provider instantiated '{actual_model}'")
+        provider_obj = self._get_provider(request)
 
         # COMPARISON prompt budget is 3000 tokens
         instructions = "Format the response as a markdown table comparison matrix comparing features, specs, pros/cons."
@@ -712,11 +683,7 @@ class ResearchController:
         
         self._setup_session(request, strategy, result, tracer)
 
-        registry = ToolRegistry()
-        from khabrichacha.tools.builtin.search_web import SearchWebTool
-        from khabrichacha.tools.builtin.fetch_page import FetchPageTool
-        registry.register_tool(SearchWebTool())
-        registry.register_tool(FetchPageTool())
+        registry = self._tool_registry
         
         # Retriever & Rank
         ret_start = time.time()
@@ -742,17 +709,7 @@ class ResearchController:
         tracer.record_module("ContextOptimizer", (time.time()-opt_start)*1000)
         
         # LLM Call
-        session = Session()
-        if "providers" not in session.config:
-            session.config["providers"] = {}
-        session.config["providers"][request.provider] = {"model": request.model}
-        llm_manager = LLMManager(session.config)
-        provider_obj = llm_manager.get_provider(request.provider)
-        
-        # Model Verification
-        actual_model = getattr(provider_obj, "model", None) or getattr(provider_obj, "model_name", None)
-        if actual_model != request.model:
-            raise ValueError(f"Model mismatch: requested '{request.model}', but provider instantiated '{actual_model}'")
+        provider_obj = self._get_provider(request)
 
         instructions = "Analyze the context information and answer the query comprehensively, resolving contradictions."
         prompt = self.enforce_prompt_budget(
@@ -839,8 +796,7 @@ class ResearchController:
         if actual_model != request.model:
             raise ValueError(f"Model mismatch: requested '{request.model}', but provider instantiated '{actual_model}'.")
             
-        registry = ToolRegistry()
-        executor = ToolExecutor(registry, project_id, result.project_path)
+        executor = ToolExecutor(self._tool_registry, project_id, result.project_path)
         
         orchestrator = Orchestrator(
             session=session,

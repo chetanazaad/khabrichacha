@@ -51,6 +51,13 @@ class ExecutionTraceRecorder:
         self.trace_data["confidence"] = confidence
         self.trace_data["complexity_score"] = complexity
 
+    def record_runtime_info(self, config_source: str = "", tool_registry_source: str = "", session_created: bool = True):
+        self.trace_data["runtime_info"] = {
+            "config_source": config_source,
+            "tool_registry_source": tool_registry_source,
+            "session_created": session_created,
+        }
+
     def record_consensus(self, score: float):
         self.trace_data["consensus_score"] = score
 

@@ -1,17 +1,18 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from loguru import logger
 
-from khabrichacha.core.session import Session
 from khabrichacha.llm.manager import LLMManager
 
 class QualityEvaluator:
     """
     Evaluates final answer quality across multiple dimensions:
     completeness, correctness, citation quality, structure, relevance, and hallucination risk.
+    
+    Uses a shared LLMManager instance if provided (no redundant Session/LLMManager creation).
     """
     
-    def __init__(self):
-        pass
+    def __init__(self, llm_manager: Optional[LLMManager] = None):
+        self._llm_manager = llm_manager
 
     def evaluate(self, query: str, answer: str, source_count: int, strategy: str, provider: str, model: str) -> Dict[str, Any]:
         """
@@ -49,8 +50,13 @@ class QualityEvaluator:
             
         # 2. LLM-based Evaluation
         try:
-            session = Session()
-            llm_manager = LLMManager(session.config)
+            if self._llm_manager is not None:
+                llm_manager = self._llm_manager
+            else:
+                from khabrichacha.llm.manager import LLMManager
+                from khabrichacha.core.session import Session
+                session = Session()
+                llm_manager = LLMManager(session.config)
             provider_obj = llm_manager.get_provider(provider)
             
             prompt = (

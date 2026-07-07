@@ -8,6 +8,8 @@ from khabrichacha.ui.callbacks import (
     stop_research,
     load_project,
     save_project_clicked,
+    _workspace_manager,
+    _provider_manager,
 )
 
 
@@ -23,12 +25,8 @@ def build_layout():
 def _get_project_list():
     """Load projects from ProjectManager; fall back to empty list."""
     try:
-        from deployment.config_loader import load_config
-        from deployment.workspace.workspace_manager import WorkspaceManager
         from deployment.workspace.project_manager import ProjectManager
-        config = load_config()
-        ws = WorkspaceManager(config.workspace.root)
-        pm = ProjectManager(ws)
+        pm = ProjectManager(_workspace_manager)
         return pm.list_projects()
     except Exception:
         return []
@@ -37,11 +35,7 @@ def _get_project_list():
 def _get_model_options():
     """Discover available models from ProviderManager; fall back to defaults."""
     try:
-        from khabrichacha.providers.provider_manager import ProviderManager
-        from deployment.config_loader import load_config
-        config = load_config()
-        pm = ProviderManager(config.model_dump())
-        options = pm.get_available_models()
+        options = _provider_manager.get_available_models()
         if options:
             return options
     except Exception as e:
@@ -107,11 +101,7 @@ def _build_left_nav():
 def _build_system_status():
     """Builds a small panel showing provider health."""
     try:
-        from khabrichacha.providers.provider_manager import ProviderManager
-        from deployment.config_loader import load_config
-        config = load_config()
-        pm = ProviderManager(config.model_dump())
-        providers = pm.discover_providers()
+        providers = _provider_manager.discover_providers()
         
         with ui.column().classes("w-full px-2 py-1 bg-gray-800 rounded text-xs gap-1"):
             for p_name, data in providers.items():

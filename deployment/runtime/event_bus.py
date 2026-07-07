@@ -58,6 +58,10 @@ class EventBus:
         
     def warn(self, component: str, message: str, **metadata) -> None:
         self.publish(ResearchEvent(level="WARNING", component=component, message=message, metadata=metadata))
+
+    def warning(self, component: str, message: str, **metadata) -> None:
+        """Alias for warn() for API consistency."""
+        self.warn(component, message, **metadata)
         
     def error(self, component: str, message: str, **metadata) -> None:
         self.publish(ResearchEvent(level="ERROR", component=component, message=message, metadata=metadata))
