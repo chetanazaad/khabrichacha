@@ -64,3 +64,55 @@ class EventBus:
         
     def debug(self, component: str, message: str, **metadata) -> None:
         self.publish(ResearchEvent(level="DEBUG", component=component, message=message, metadata=metadata))
+
+    # ── Standard Pipeline Events ──────────────────────────────
+    def research_started(self, message: str = "Research started.", **kwargs) -> None:
+        self.info("Controller", message, event_type="ResearchStarted", **kwargs)
+
+    def classifier_completed(self, message: str = "Classification completed.", **kwargs) -> None:
+        self.info("QueryClassifier", message, event_type="ClassifierCompleted", **kwargs)
+
+    def retrieval_started(self, message: str = "Retrieval started.", **kwargs) -> None:
+        self.info("Retriever", message, event_type="RetrievalStarted", **kwargs)
+
+    def retrieval_completed(self, message: str = "Retrieval completed.", **kwargs) -> None:
+        self.info("Retriever", message, event_type="RetrievalCompleted", **kwargs)
+
+    def search_started(self, message: str = "Search started.", **kwargs) -> None:
+        self.info("SearchTool", message, event_type="SearchStarted", **kwargs)
+
+    def search_completed(self, message: str = "Search completed.", **kwargs) -> None:
+        self.info("SearchTool", message, event_type="SearchCompleted", **kwargs)
+
+    def fetch_started(self, message: str = "Fetch started.", **kwargs) -> None:
+        self.info("FetchTool", message, event_type="FetchStarted", **kwargs)
+
+    def fetch_completed(self, message: str = "Fetch completed.", **kwargs) -> None:
+        self.info("FetchTool", message, event_type="FetchCompleted", **kwargs)
+
+    def llm_started(self, message: str = "LLM generation started.", **kwargs) -> None:
+        self.info("LLM", message, event_type="LLMStarted", **kwargs)
+
+    def llm_completed(self, message: str = "LLM generation completed.", **kwargs) -> None:
+        self.info("LLM", message, event_type="LLMCompleted", **kwargs)
+
+    def formatting_started(self, message: str = "Formatting started.", **kwargs) -> None:
+        self.info("Formatter", message, event_type="FormattingStarted", **kwargs)
+
+    def formatting_completed(self, message: str = "Formatting completed.", **kwargs) -> None:
+        self.info("Formatter", message, event_type="FormattingCompleted", **kwargs)
+
+    def project_created(self, message: str = "Project created.", **kwargs) -> None:
+        self.info("ProjectManager", message, event_type="ProjectCreated", **kwargs)
+
+    def project_saved(self, message: str = "Project saved.", **kwargs) -> None:
+        self.info("ProjectManager", message, event_type="ProjectSaved", **kwargs)
+
+    def report_generated(self, message: str = "Report generated.", **kwargs) -> None:
+        self.info("ReportExporter", message, event_type="ReportGenerated", **kwargs)
+
+    def execution_finished(self, message: str = "Execution finished.", **kwargs) -> None:
+        self.info("Controller", message, event_type="ExecutionFinished", **kwargs)
+
+    def execution_failed(self, message: str = "Execution failed.", **kwargs) -> None:
+        self.error("Controller", message, event_type="ExecutionFailed", **kwargs)

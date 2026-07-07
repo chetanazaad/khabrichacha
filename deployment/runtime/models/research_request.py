@@ -13,6 +13,7 @@ class ResearchRequest(BaseModel):
     workspace: str
     project_id: Optional[str] = None
     resume: bool = False
+    strategy_override: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     
     @field_validator("mission")

@@ -132,8 +132,36 @@ def run_verification(workspace=None, config=None):
             return True  # Not Colab — skip
     all_passed &= _check("Google Drive (if Colab)", _check_drive)
 
-    # ── NiceGUI ──────────────────────────────────────────
-    all_passed &= _check("NiceGUI", lambda: __import__("nicegui") is not None)
+    # ── Strategy, Retrieval & Intelligence (v1.4, v1.5, v1.6) ──
+    all_passed &= _check("Query Classifier (v1.4)", lambda: __import__("deployment.runtime.query_classifier") is not None)
+    all_passed &= _check("Retriever (v1.5)", lambda: __import__("deployment.runtime.retrieval.retriever") is not None)
+    all_passed &= _check("Deduplicator (v1.5)", lambda: __import__("deployment.runtime.retrieval.deduplicator") is not None)
+    all_passed &= _check("Source Ranker (v1.5)", lambda: __import__("deployment.runtime.retrieval.source_ranker") is not None)
+    all_passed &= _check("Trust Evaluator (v1.5)", lambda: __import__("deployment.runtime.retrieval.trust_evaluator") is not None)
+    all_passed &= _check("Workspace Index (v1.5)", lambda: __import__("deployment.runtime.retrieval.workspace_index") is not None)
+    all_passed &= _check("Knowledge Retriever (v1.5)", lambda: __import__("deployment.runtime.retrieval.knowledge_retriever") is not None)
+    all_passed &= _check("Structured Extractor (v1.5)", lambda: __import__("deployment.runtime.extraction.structured_extractor") is not None)
+    all_passed &= _check("Table Normalizer (v1.5)", lambda: __import__("deployment.runtime.extraction.table_normalizer") is not None)
+    all_passed &= _check("Numerical Validator (v1.6)", lambda: __import__("deployment.runtime.intelligence.numerical_validator") is not None)
+    all_passed &= _check("Consensus Engine (v1.6)", lambda: __import__("deployment.runtime.intelligence.consensus_engine") is not None)
+    all_passed &= _check("Entity Resolver (v1.6)", lambda: __import__("deployment.runtime.intelligence.entity_resolver") is not None)
+    all_passed &= _check("Temporal Resolver (v1.6)", lambda: __import__("deployment.runtime.intelligence.temporal_resolver") is not None)
+    all_passed &= _check("Context Optimizer (v1.6)", lambda: __import__("deployment.runtime.intelligence.context_optimizer") is not None)
+    all_passed &= _check("Query Decomposer (v1.6)", lambda: __import__("deployment.runtime.intelligence.query_decomposer") is not None)
+    all_passed &= _check("Knowledge Graph (v1.6)", lambda: __import__("deployment.runtime.intelligence.knowledge_graph") is not None)
+    all_passed &= _check("Citation Builder (v1.6)", lambda: __import__("deployment.runtime.intelligence.citation_builder") is not None)
+    all_passed &= _check("Tool Selector (v1.6)", lambda: __import__("deployment.runtime.intelligence.tool_selector") is not None)
+    all_passed &= _check("Model Selector (v1.6)", lambda: __import__("deployment.runtime.intelligence.model_selector") is not None)
+    all_passed &= _check("Failure Recovery (v1.6)", lambda: __import__("deployment.runtime.intelligence.failure_recovery") is not None)
+    all_passed &= _check("Response Planner (v1.5)", lambda: __import__("deployment.runtime.response_planner") is not None)
+    all_passed &= _check("Advanced Result Builder (v1.5)", lambda: __import__("deployment.runtime.advanced_result_builder") is not None)
+    
+    # ── Refinements (v1.7) ──
+    all_passed &= _check("Answerability Estimator (v1.7)", lambda: __import__("deployment.runtime.intelligence.answerability_estimator") is not None)
+    all_passed &= _check("Official Source Resolver (v1.7)", lambda: __import__("deployment.runtime.intelligence.official_source_resolver") is not None)
+    all_passed &= _check("Structured Resolver (v1.7)", lambda: __import__("deployment.runtime.intelligence.structured_resolver") is not None)
+    all_passed &= _check("Cost Estimator (v1.7)", lambda: __import__("deployment.runtime.intelligence.cost_estimator") is not None)
+    all_passed &= _check("Intent Memory (v1.7)", lambda: __import__("deployment.runtime.intelligence.intent_memory") is not None)
 
     # ── Summary ──────────────────────────────────────────
     print()

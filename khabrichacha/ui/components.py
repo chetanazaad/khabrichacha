@@ -7,6 +7,7 @@ from khabrichacha.ui.callbacks import (
     resume_research,
     stop_research,
     load_project,
+    save_project_clicked,
 )
 
 
@@ -137,7 +138,7 @@ def _build_mission_panel():
 
         ui_state.goal_input = ui.textarea("Mission Objective").classes("w-full").props(
             "placeholder='Describe your research mission. What evidence, comparisons, or references are needed?\\ne.g. Analyze the competitive landscape of AI chip manufacturers...'"
-        )
+        ).on('keyup', lambda: None)
 
         ui.html('<div class="text-xs text-gray-400 font-semibold mt-1">Research Providers</div>')
         with ui.row().classes("w-full gap-2 flex-wrap"):
@@ -153,11 +154,13 @@ def _build_mission_panel():
                 value=model_options[0] if model_options else "gpt-4",
             ).classes("flex-1")
 
-            ui_state.depth_select = ui.select(
-                label="Depth",
-                options=["Quick", "Standard", "Deep", "Extreme"],
-                value="Standard",
-            ).classes("w-32")
+            ui_state.strategy_select = ui.select(
+                label="Strategy",
+                options=["Auto (Recommended)", "Fast Answer", "Lookup",
+                         "Structured Data", "Comparison", "Analysis",
+                         "Research", "Deep Research"],
+                value="Auto (Recommended)",
+            ).classes("w-40")
 
             ui_state.sources_input = ui.number(
                 label="Max Sources",
@@ -169,6 +172,7 @@ def _build_mission_panel():
             ui.button("Pause", on_click=pause_research).classes("control-btn secondary")
             ui.button("Resume", on_click=resume_research).classes("control-btn secondary")
             ui.button("Stop", on_click=stop_research).classes("control-btn secondary")
+            ui_state.save_project_btn = ui.button("Save Project", on_click=save_project_clicked).classes("control-btn").props("disable")
 
 
 def _build_right_panel():
@@ -184,6 +188,33 @@ def _build_progress_header():
         with ui.row().classes("w-full items-center justify-between"):
             ui_state.progress_label = ui.label("Step 0 of 0").classes("text-xs text-gray-400")
             ui.label("Ready").classes("text-xs text-gray-500")
+
+        ui.html('<hr class="border-gray-700 my-1">')
+        ui.html('<div class="text-[10px] text-indigo-400 font-semibold uppercase tracking-wider">Strategy & Routing</div>')
+        with ui.row().classes("w-full gap-4 text-xs"):
+            ui_state.strategy_indicator = ui.label("Strategy: —").classes("text-indigo-300 font-semibold")
+            ui_state.confidence_indicator = ui.label("Confidence: —").classes("text-gray-400")
+            ui_state.latency_indicator = ui.label("Est. Time: —").classes("text-gray-400")
+            ui_state.cost_indicator = ui.label("Est. Cost: —").classes("text-gray-400")
+            
+        with ui.row().classes("w-full gap-3 text-[10px] text-gray-500"):
+            ui_state.planner_indicator = ui.label("Planner: —")
+            ui_state.search_indicator = ui.label("Search: —")
+            ui_state.reasoning_indicator = ui.label("Reasoning: —")
+            ui_state.evidence_indicator = ui.label("Evidence: —")
+            ui_state.report_indicator = ui.label("Report: —")
+            ui_state.project_indicator = ui.label("Project: —")
+
+        ui.html('<hr class="border-gray-700 my-1">')
+        ui.html('<div class="text-[10px] text-indigo-400 font-semibold uppercase tracking-wider">Retrieval & Consensus</div>')
+        with ui.row().classes("w-full gap-3 text-[10px] text-gray-400 flex-wrap"):
+            ui_state.sources_found_indicator = ui.label("Found: —")
+            ui_state.sources_selected_indicator = ui.label("Selected: —")
+            ui_state.duplicates_removed_indicator = ui.label("Duplicates: —")
+            ui_state.trust_score_indicator = ui.label("Avg Trust: —")
+            ui_state.output_format_indicator = ui.label("Format: —")
+            ui_state.knowledge_cache_indicator = ui.label("Cache Hits: —")
+            ui_state.consensus_score_indicator = ui.label("Consensus: —")
 
 
 def _build_tabbed_workspace():

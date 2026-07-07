@@ -1,0 +1,88 @@
+profiles:
+  gov:
+    trust: 100
+    authority: 95
+    description: "Official government websites"
+    patterns:
+      - ".gov"
+      - ".gov.in"
+      - ".nic.in"
+      - ".gov.uk"
+      - ".gov.au"
+  edu:
+    trust: 95
+    authority: 90
+    description: "Universities and educational institutions"
+    patterns:
+      - ".edu"
+      - ".ac.in"
+      - ".ac.uk"
+      - ".edu.in"
+  research:
+    trust: 90
+    authority: 88
+    description: "Research institutes and journals"
+    patterns:
+      - "arxiv.org"
+      - "nature.com"
+      - "sciencedirect.com"
+      - "ieee.org"
+      - "springer.com"
+      - "ncbi.nlm.nih.gov"
+  company:
+    trust: 88
+    authority: 85
+    description: "Company official websites"
+    patterns:
+      - "microsoft.com"
+      - "google.com"
+      - "apple.com"
+      - "nvidia.com"
+      - "intel.com"
+  wikipedia:
+    trust: 80
+    authority: 75
+    description: "Wikipedia"
+    patterns:
+      - "wikipedia.org"
+      - "wikimedia.org"
+  news:
+    trust: 75
+    authority: 70
+    description: "Established news organizations"
+    patterns:
+      - "reuters.com"
+      - "bbc.com"
+      - "apnews.com"
+      - "nytimes.com"
+      - "thehindu.com"
+      - "bloomberg.com"
+      - "cnn.com"
+      - "wsj.com"
+  blogs:
+    trust: 45
+    authority: 35
+    description: "Blog and opinion platforms"
+    patterns:
+      - "medium.com"
+      - "substack.com"
+      - "wordpress.com"
+      - "blogspot.com"
+  social:
+    trust: 25
+    authority: 15
+    description: "Social media platforms"
+    patterns:
+      - "twitter.com"
+      - "x.com"
+      - "reddit.com"
+      - "facebook.com"
+      - "instagram.com"
+  forums:
+    trust: 35
+    authority: 30
+    description: "Forums and Q&A"
+    patterns:
+      - "stackoverflow.com"
+      - "quora.com"
+      - "reddit.com/r/AskScience"

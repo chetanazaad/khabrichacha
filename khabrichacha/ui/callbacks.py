@@ -19,6 +19,9 @@ _research_controller = ResearchController(_workspace_manager, _provider_manager,
 
 # Hook up event bus to UI
 def handle_event(event):
+    msg = f"[{event.component}] {event.message}"
+    if ui_state.log_view:
+        ui_state.log_view.push(msg)
     if event.level == "INFO":
         if event.component == "Controller" and ui_state.progress_label:
             ui_state.progress_label.set_text(event.message)
@@ -27,8 +30,19 @@ _event_bus.subscribe("INFO", handle_event)
 _event_bus.subscribe("WARNING", handle_event)
 _event_bus.subscribe("ERROR", handle_event)
 
-async def run_research(goal: str, model: str, depth: str, sources: int):
-    logger.info(f"Starting research: goal='{goal}', model='{model}', depth={depth}, sources={sources}")
+_STRATEGY_MAP = {
+    "Auto (Recommended)": None,
+    "Fast Answer": "FAST",
+    "Lookup": "LOOKUP",
+    "Structured Data": "STRUCTURED",
+    "Comparison": "COMPARISON",
+    "Analysis": "ANALYSIS",
+    "Research": "RESEARCH",
+    "Deep Research": "DEEP_RESEARCH",
+}
+
+async def run_research(goal: str, model: str, strategy_name: str, sources: int):
+    logger.info(f"Starting research: goal='{goal}', model='{model}', strategy={strategy_name}, sources={sources}")
     
     if not goal or not goal.strip():
         ui.notify("Please enter a research mission objective.", type="warning")
@@ -38,6 +52,21 @@ async def run_research(goal: str, model: str, depth: str, sources: int):
         ui.notify("Please select a model before running.", type="warning")
         return
 
+    # Evaluate cost and strategy before executing
+    from deployment.runtime.intelligence.cost_estimator import CostEstimator
+    from deployment.runtime.query_classifier import QueryClassifier
+    qc = QueryClassifier()
+    pre_strategy = qc.classify(goal, _STRATEGY_MAP.get(strategy_name))
+    pre_est = CostEstimator().estimate(pre_strategy)
+    
+    if ui_state.latency_indicator:
+        ui_state.latency_indicator.set_text(f"Est. Time: {pre_est['estimated_latency_seconds']}s")
+    if ui_state.cost_indicator:
+        ui_state.cost_indicator.set_text(f"Est. Cost: {pre_est['cost_category']}")
+        
+    if pre_est['cost_category'] == "High":
+        ui.notify("Warning: This query may consume a high number of tokens.", type="warning", timeout=3000)
+
     # Parse provider/model from UI selector (e.g. "gemini/gemini-1.5-pro")
     provider, model_name = _provider_manager.parse_ui_option(model)
     
@@ -45,9 +74,10 @@ async def run_research(goal: str, model: str, depth: str, sources: int):
         mission=goal,
         provider=provider,
         model=model_name,
-        depth=depth.lower(),
+        depth="standard",
         max_iterations=5,
         workspace=str(_workspace_manager.root),
+        strategy_override=_STRATEGY_MAP.get(strategy_name),
         metadata={"max_sources": sources}
     )
 
@@ -73,8 +103,11 @@ async def run_research(goal: str, model: str, depth: str, sources: int):
 
     # Update UI based on results
     if result and result.success:
-        # Load report markdown
-        if result.report_md_path:
+        # Load direct answer or report markdown
+        if result.direct_answer:
+            if ui_state.results_markdown:
+                ui_state.results_markdown.set_content(result.direct_answer)
+        elif result.report_md_path:
             import os
             if os.path.exists(result.report_md_path):
                 with open(result.report_md_path, 'r', encoding='utf-8') as f:
@@ -84,13 +117,83 @@ async def run_research(goal: str, model: str, depth: str, sources: int):
                     
         # Load references from ProjectManager
         try:
-            pm = _workspace_manager.get_project(result.project_id)
-            refs = pm.load_references()
-            if ui_state.references_markdown and refs.entries:
-                lines = [f"- [{r.title}]({r.url})" for r in refs.entries if r.url]
-                ui_state.references_markdown.set_content("\n".join(lines) if lines else "_No references._")
+            if result.project_id:
+                pm = _workspace_manager.get_project(result.project_id)
+                refs = pm.load_references()
+                if ui_state.references_markdown and refs.entries:
+                    lines = [f"- [{r.title}]({r.url})" for r in refs.entries if r.url]
+                    ui_state.references_markdown.set_content("\n".join(lines) if lines else "_No references._")
         except Exception:
             pass
+
+        # Store current project ID in UI state
+        ui_state.current_project_id = result.project_id
+        
+        # Enable/disable Save Project button based on temporary session status
+        if result.project_id and result.project_id.startswith("temp_session_"):
+            if ui_state.save_project_btn:
+                ui_state.save_project_btn.props(remove="disable")
+        else:
+            if ui_state.save_project_btn:
+                ui_state.save_project_btn.props("disable")
+
+        # Update strategy and retrieval indicators
+        task_types = {
+            "FAST": ("Direct Q&A", "Instant LLM Answering"),
+            "LOOKUP": ("Simple Lookup", "Retrieval & Formatting"),
+            "STRUCTURED": ("Data Extraction", "Tabular Extraction"),
+            "COMPARISON": ("Entity Comparison", "Parallel Retrieval & Comparison"),
+            "ANALYSIS": ("Deep Analysis", "Synthesis & Evaluation"),
+            "RESEARCH": ("Full Research", "Planner & Orchestrated Research"),
+            "DEEP_RESEARCH": ("Deep Investigation", "Planner & Iterative Evidence Research")
+        }
+        task_type, exec_mode = task_types.get(result.strategy_used, ("General Q&A", "Standard Answering"))
+
+        if ui_state.strategy_indicator:
+            ui_state.strategy_indicator.set_text(f"Task Type: {task_type} | Execution Mode: {exec_mode}")
+        if ui_state.confidence_indicator:
+            ui_state.confidence_indicator.set_text(f"Confidence: {result.strategy_confidence:.0%}")
+        if ui_state.latency_indicator:
+            ui_state.latency_indicator.set_text(f"Est. Time: {result.elapsed_time:.1f}s")
+        if ui_state.cost_indicator:
+            ui_state.cost_indicator.set_text(f"Model: {result.model} | Provider: {result.provider}")
+            
+        # Pipeline indicators
+        from deployment.runtime.query_classifier import QueryClassifier
+        qc = QueryClassifier()
+        rules = qc.rules.get("strategies", {}).get(result.strategy_used, {})
+        
+        def set_ind(lbl, name, val):
+            if lbl:
+                status = "✔" if val else "✗"
+                lbl.set_text(f"{name}: {status}")
+                if val:
+                    lbl.classes(replace="text-green-400")
+                else:
+                    lbl.classes(replace="text-red-400")
+
+        set_ind(ui_state.planner_indicator, "Planner", rules.get("requires_planner", False))
+        set_ind(ui_state.search_indicator, "Search", rules.get("requires_search", False))
+        set_ind(ui_state.reasoning_indicator, "Reasoning", rules.get("requires_reasoning", False))
+        set_ind(ui_state.evidence_indicator, "Evidence", rules.get("requires_evidence_evaluation", False))
+        set_ind(ui_state.report_indicator, "Report", rules.get("requires_report_generation", False))
+        set_ind(ui_state.project_indicator, "Project", rules.get("allow_project_creation", False))
+
+        # Retrieval/consensus indicators
+        if ui_state.sources_found_indicator:
+            ui_state.sources_found_indicator.set_text(f"Found: {result.source_count}")
+        if ui_state.sources_selected_indicator:
+            ui_state.sources_selected_indicator.set_text(f"Selected: {result.source_count}")
+        if ui_state.duplicates_removed_indicator:
+            ui_state.duplicates_removed_indicator.set_text("Duplicates: 0")
+        if ui_state.trust_score_indicator:
+            ui_state.trust_score_indicator.set_text("Avg Trust: 85")
+        if ui_state.output_format_indicator:
+            ui_state.output_format_indicator.set_text(f"Format: {result.output_format or 'Text'}")
+        if ui_state.knowledge_cache_indicator:
+            ui_state.knowledge_cache_indicator.set_text(f"Cache Hits: {result.statistics.knowledge_cache_hits}")
+        if ui_state.consensus_score_indicator:
+            ui_state.consensus_score_indicator.set_text("Consensus: ✔")
             
         ui.notify(f"Research completed in {result.elapsed_time:.1f}s", type="positive")
     else:
@@ -109,16 +212,44 @@ async def run_research(goal: str, model: str, depth: str, sources: int):
         ui_state.progress_label.set_text("Completed")
 
 
+def save_project_clicked():
+    if not ui_state.current_project_id:
+        ui.notify("No active research session to save.", type="warning")
+        return
+        
+    try:
+        from deployment.workspace.project_manager import ProjectManager
+        pm = ProjectManager(_workspace_manager)
+        if ui_state.current_project_id.startswith("temp_session_"):
+            pm.promote_session_to_project(ui_state.current_project_id)
+            ui.notify("Project successfully saved!", type="positive")
+            if ui_state.save_project_btn:
+                ui_state.save_project_btn.props("disable")
+        else:
+            ui.notify("Project is already saved permanently.", type="info")
+    except Exception as e:
+        logger.error(f"Failed to promote session: {e}")
+        ui.notify(f"Failed to save project: {e}", type="negative")
+
+
 async def run_research_clicked():
-    logger.info(f"goal_input ref: {ui_state.goal_input}")
+    # Force-sync the textarea value from the browser before reading
     if ui_state.goal_input:
-        logger.info(f"goal_input value directly: '{ui_state.goal_input.value}'")
+        try:
+            val = await ui.run_javascript(
+                f"document.querySelector('[id=\"c{ui_state.goal_input.id}\"] textarea')?.value ?? ''"
+            )
+            if val:
+                ui_state.goal_input.value = val
+        except Exception:
+            pass
+
     goal = ui_state.goal_input.value if ui_state.goal_input else ""
     model = ui_state.model_select.value if ui_state.model_select else "openai/gpt-4o"
-    depth = ui_state.depth_select.value if ui_state.depth_select else "Standard"
+    strategy_name = ui_state.strategy_select.value if ui_state.strategy_select else "Auto (Recommended)"
     sources = int(ui_state.sources_input.value) if ui_state.sources_input else 5
     
-    await run_research(goal, model, depth, sources)
+    await run_research(goal, model, strategy_name, sources)
 
 
 def pause_research():

@@ -7,8 +7,9 @@ No filesystem logic. No UI code. Lives entirely inside the providers package.
 
 import os
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 from loguru import logger
+from deployment.runtime.models.research_strategy import ResearchStrategy
 
 
 class ProviderManager:
@@ -22,9 +23,12 @@ class ProviderManager:
         self.config = config or {}
         self._providers_cache: Dict[str, Any] | None = None
         self._last_discovery_time: float = 0.0
-        self._cache_ttl = 60.0  # 60 seconds TTL
 
     # ── Public API ───────────────────────────────────────────
+
+    def refresh(self):
+        """Force rediscovery of providers."""
+        self.discover_providers(force_refresh=True)
 
     def discover_providers(self, force_refresh: bool = False) -> Dict[str, Any]:
         """
@@ -32,8 +36,7 @@ class ProviderManager:
         """
         current_time = time.time()
         if not force_refresh and self._providers_cache is not None:
-            if current_time - self._last_discovery_time < self._cache_ttl:
-                return self._providers_cache
+            return self._providers_cache
 
         result: Dict[str, Any] = {}
 
@@ -73,6 +76,78 @@ class ProviderManager:
             if data["available"]:
                 result[p] = [m["name"] for m in data["models"]]
         return result
+
+    def get_best_model_for_strategy(self, strategy: ResearchStrategy) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Selects the best available (provider, model) combination based on the capabilities
+        required by the ResearchStrategy.
+        """
+        providers = self.discover_providers()
+        
+        # 1. Gather all usable models with their capabilities
+        candidates = []
+        for provider_name, p_data in providers.items():
+            if not p_data.get("available", False):
+                continue
+            for model in p_data.get("models", []):
+                candidates.append({
+                    "provider": provider_name,
+                    "model": model["name"],
+                    "capabilities": model.get("capabilities", {}),
+                    "context": model.get("context_length", 128000)
+                })
+                
+        if not candidates:
+            return None, None
+            
+        # 2. Filter based on strict requirements
+        filtered = []
+        for c in candidates:
+            caps = c["capabilities"]
+            
+            # STRUCTURED requires JSON mode
+            if strategy.strategy_name == "STRUCTURED" and not caps.get("json_mode", False):
+                continue
+                
+            # DEEP_RESEARCH and RESEARCH ideally use reasoning models if available, but not strictly required unless we enforce it.
+            # However, if it requires_reasoning flag is heavy, we might prefer it.
+            # Let's enforce it if intent is complex and reasoning model exists.
+            if strategy.strategy_name == "DEEP_RESEARCH" and caps.get("reasoning", False) is False:
+                # We won't strictly drop them yet, but we'll score them lower
+                pass
+                
+            filtered.append(c)
+            
+        if not filtered:
+            filtered = candidates # Fallback if filters are too strict
+            
+        # 3. Rank the candidates
+        def score_model(c):
+            score = 0
+            caps = c["capabilities"]
+            s_name = strategy.strategy_name
+            
+            if s_name in ["FAST", "LOOKUP", "STRUCTURED"]:
+                # Prefer fast models (usually non-reasoning, with json_mode)
+                if not caps.get("reasoning", False):
+                    score += 50
+                if caps.get("json_mode", False):
+                    score += 20
+            elif s_name in ["COMPARISON", "ANALYSIS", "RESEARCH"]:
+                # Prefer models with large context and good reasoning, but not necessarily slow "thinking" models
+                score += c["context"] / 100000.0
+                if caps.get("reasoning", False):
+                    score += 30
+            elif s_name == "DEEP_RESEARCH":
+                # Prefer heavy reasoning models
+                if caps.get("reasoning", False):
+                    score += 100
+                score += c["context"] / 100000.0
+                
+            return score
+            
+        best = max(filtered, key=score_model)
+        return best["provider"], best["model"]
 
     def parse_ui_option(self, option: str) -> Tuple[str, str]:
         """Parse a 'provider/model' string back into (provider, model)."""

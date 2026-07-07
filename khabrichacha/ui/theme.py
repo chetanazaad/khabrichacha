@@ -143,5 +143,22 @@ def get_custom_css() -> str:
     .q-tabs__arrow {
         color: #818cf8;
     }
+
+    /* ----- Strategy Badges ----- */
+    .strategy-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 30px;
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+    .strategy-fast { background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid rgba(52,211,153,0.4); }
+    .strategy-lookup { background: rgba(59,130,246,0.2); color: #60a5fa; border: 1px solid rgba(96,165,250,0.4); }
+    .strategy-structured { background: rgba(168,85,247,0.2); color: #c084fc; border: 1px solid rgba(192,132,252,0.4); }
+    .strategy-comparison { background: rgba(245,158,11,0.2); color: #fbbf24; border: 1px solid rgba(251,191,36,0.4); }
+    .strategy-analysis { background: rgba(236,72,153,0.2); color: #f472b6; border: 1px solid rgba(244,114,182,0.4); }
+    .strategy-research { background: rgba(99,102,241,0.2); color: #818cf8; border: 1px solid rgba(129,140,248,0.4); }
+    .strategy-deep { background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(248,113,113,0.4); }
 </style>
 """
