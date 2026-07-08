@@ -30,6 +30,42 @@ except ImportError:
     logger.warning("reportlab not installed — PDF generation will be skipped.")
 
 
+def clean_latin1(text: str) -> str:
+    if not text:
+        return ""
+    replacements = {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u20b9": "Rs.",
+        "\u2022": "*",
+        "\u2026": "...",
+        "\u00a0": " ",
+    }
+    for orig, rep in replacements.items():
+        text = text.replace(orig, rep)
+    return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
+def clean_xml_compatible(text: str) -> str:
+    if not text:
+        return ""
+    chars = []
+    for c in text:
+        codepoint = ord(c)
+        if (codepoint == 0x9 or codepoint == 0xA or codepoint == 0xD or
+            (0x20 <= codepoint <= 0xD7FF) or
+            (0xE000 <= codepoint <= 0xFFFD) or
+            (0x10000 <= codepoint <= 0x10FFFF)):
+            chars.append(c)
+        else:
+            chars.append(" ")
+    return "".join(chars)
+
+
 class ReportExporter:
     """
     Generates research deliverables from orchestrator results.
@@ -177,7 +213,8 @@ class ReportExporter:
         def esc(val):
             if not val:
                 return ""
-            return html.escape(str(val))
+            cleaned = clean_latin1(str(val))
+            return html.escape(cleaned)
 
         title_esc = esc(title)
         mission_esc = esc(mission)
@@ -348,6 +385,17 @@ class ReportExporter:
             logger.warning("python-docx not installed — skipping Word export.")
             return None
             
+        # Clean inputs to be XML-compatible
+        title = clean_xml_compatible(title)
+        mission = clean_xml_compatible(mission)
+        provider = clean_xml_compatible(provider)
+        model = clean_xml_compatible(model)
+        findings = [clean_xml_compatible(f) for f in findings]
+        sources = [{k: clean_xml_compatible(v) for k, v in s.items()} for s in sources]
+        evidence = clean_xml_compatible(evidence)
+        timeline = clean_xml_compatible(timeline)
+        timestamp = clean_xml_compatible(timestamp)
+
         doc = Document()
         
         # Styles / Fonts
