@@ -307,8 +307,33 @@ class ResearchController:
                     profiler = RuntimeProfiler()
                     profiler.set_strategy(strategy.strategy_name)
                     profiler.dump_trace(str(p_path))
+                    
+                    # Auto-Save to Google Drive if in Colab environment (Task 5)
+                    try:
+                        import colab_utils
+                        import shutil
+                        from pathlib import Path
+                        if colab_utils.is_colab():
+                            drive_root = Path("/content/drive/MyDrive/KhabriChacha")
+                            if final_result.project_id.startswith("temp_session_"):
+                                drive_dest = drive_root / "temp" / final_result.project_id
+                            else:
+                                drive_dest = drive_root / "projects" / final_result.project_id
+                            
+                            if p_path.exists():
+                                drive_dest.mkdir(parents=True, exist_ok=True)
+                                for item in p_path.glob("**/*"):
+                                    if item.is_file():
+                                        rel_path = item.relative_to(p_path)
+                                        dest_file = drive_dest / rel_path
+                                        dest_file.parent.mkdir(parents=True, exist_ok=True)
+                                        shutil.copy2(item, dest_file)
+                                logger.info(f"Automatically saved project {final_result.project_id} to Google Drive at {drive_dest}")
+                    except Exception as gd_err:
+                        logger.warning(f"Failed to auto-save to Google Drive: {gd_err}")
                 except Exception as e:
                     logger.warning(f"Failed to write traces: {e}")
+
             
             return final_result
             

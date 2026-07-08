@@ -7,11 +7,32 @@ The server is started from app.py to satisfy NiceGUI's main-module check.
 from nicegui import ui, app
 from khabrichacha.ui.theme import get_custom_css
 from khabrichacha.ui.components import build_layout
+from khabrichacha.ui.setup_wizard import check_missing_dependencies, get_installed_ollama_models
+from khabrichacha.core.model_recommender import recommend_model
+
+
+def is_environment_fully_setup() -> bool:
+    missing_core, _ = check_missing_dependencies()
+    if missing_core:
+        return False
+        
+    rec = recommend_model()
+    if rec["provider"] == "ollama":
+        models = get_installed_ollama_models()
+        model_to_pull = rec["model"]
+        model_exists = any(m.startswith(model_to_pull.split(":")[0]) for m in models)
+        if not model_exists:
+            return False
+            
+    return True
 
 @ui.page('/')
 def index_page():
+    if not is_environment_fully_setup():
+        return ui.navigate.to('/setup')
     ui.add_head_html(get_custom_css())
     build_layout()
+
 
 def start_application():
     @app.on_startup
