@@ -16,15 +16,16 @@ def is_environment_fully_setup() -> bool:
     if missing_core:
         return False
         
-    rec = recommend_model()
-    if rec["provider"] == "ollama":
-        models = get_installed_ollama_models()
-        model_to_pull = rec["model"]
-        model_exists = any(m.startswith(model_to_pull.split(":")[0]) for m in models)
-        if not model_exists:
-            return False
-            
-    return True
+    import os
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"):
+        return True
+        
+    models = get_installed_ollama_models()
+    if models:
+        return True
+        
+    return False
+
 
 @ui.page('/')
 def index_page():
