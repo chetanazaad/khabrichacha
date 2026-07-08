@@ -19,12 +19,16 @@ from khabrichacha.tools.builtin.report_generator import ReportGeneratorTool
 
 
 class Orchestrator:
-    def __init__(self, session: Session, llm_manager: LLMManager, tool_registry: ToolRegistry):
+    def __init__(self, session: Session, llm_manager: LLMManager, tool_registry: ToolRegistry, **kwargs):
         self.session = session
         self.llm_manager = llm_manager
         self.tool_registry = tool_registry
         self.planner = Planner(llm_manager=self.llm_manager)
         self._register_all_tools()
+        
+        self.cancel_event = kwargs.get("cancel_event")
+        from deployment.runtime.event_bus import EventBus
+        self.event_bus = EventBus()
 
     def _register_all_tools(self):
         """Register all builtin tools to the registry."""
@@ -229,13 +233,25 @@ class Orchestrator:
         state.status = "running"
         iteration = 1
         
+        from deployment.runtime.event_bus import ResearchEvent
         while iteration <= max_iterations:
+            if self.cancel_event and self.cancel_event.is_set():
+                logger.info("Cancellation event set. Stopping Orchestrator run.")
+                state.status = "failed"
+                break
+                
             elapsed_minutes = (time.time() - start_time) / 60
             if elapsed_minutes > max_runtime_minutes:
                 logger.warning(f"Maximum runtime exceeded ({elapsed_minutes:.1f}m). Stopping research.")
                 break
                 
             logger.info(f"--- Starting Iteration {iteration} ---")
+            self.event_bus.publish(ResearchEvent(
+                level="INFO",
+                component="Orchestrator",
+                message=f"Starting Iteration {iteration}/{max_iterations}...",
+                metadata={"progress": min(0.95, 0.15 + 0.75 * (iteration - 1) / max_iterations)}
+            ))
             
             # 1. Planning phase
             if iteration == 1 and max_iterations == 1:
@@ -277,8 +293,18 @@ class Orchestrator:
             
             # 3. Execute pending tasks
             for task in state.tasks:
+                if self.cancel_event and self.cancel_event.is_set():
+                    logger.info("Cancellation event set. Stopping Orchestrator task execution.")
+                    state.status = "failed"
+                    break
                 if task.status == "pending":
                     logger.info(f"Orchestrating task: {task.description} (ID: {task.id})")
+                    self.event_bus.publish(ResearchEvent(
+                        level="INFO",
+                        component="Orchestrator",
+                        message=f"Executing step: {task.description}...",
+                        metadata={"progress": min(0.95, 0.15 + 0.75 * (iteration - 1) / max_iterations + 0.05)}
+                    ))
                     state.update_task_status(task.id, "running")
                     
                     tool_name = None

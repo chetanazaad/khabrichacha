@@ -416,11 +416,12 @@ class Planner:
         else:
             if is_pdf and "fetch_pdf" in available_tools:
                 deps = [str(step_id - 1)] if step_id > 1 else []
+                url_val = f"${{step{step_id - 1}[0].url}}" if has_searched else "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
                 steps.append(PlanStep(
                     id=str(step_id),
                     description="Fetch the PDF document",
                     tool_name="fetch_pdf",
-                    args={"url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"},
+                    args={"url": url_val},
                     depends_on=deps
                 ))
                 step_id += 1
@@ -430,7 +431,7 @@ class Planner:
                     id=str(step_id),
                     description="Fetch content from search results",
                     tool_name="fetch_page",
-                    args={"url": "https://example.com"},
+                    args={"url": f"${{step{step_id - 1}[*].url}}"},
                     depends_on=deps
                 ))
                 step_id += 1

@@ -76,7 +76,8 @@ class TestSearchDiagnostics(unittest.TestCase):
             provider="ollama",
             model="qwen2.5:3b",
             strategy_override="LOOKUP",
-            workspace=str(self.workspace.root)
+            workspace=str(self.workspace.root),
+            metadata={"auto_regenerated": True}
         )
         res = self.controller.start_research(req)
         self.assertTrue(res.success)

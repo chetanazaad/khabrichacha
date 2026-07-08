@@ -49,7 +49,8 @@ class TestStrategyValidation(unittest.TestCase):
             provider="ollama", # or the configured provider
             model="qwen2.5:3b",
             strategy_override=strategy,
-            workspace=str(self.workspace.root)
+            workspace=str(self.workspace.root),
+            metadata={"auto_regenerated": True}
         )
         return self.controller.start_research(req)
 

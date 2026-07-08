@@ -223,7 +223,9 @@ def _build_tabbed_workspace():
                 ui_state.references_markdown = ui.markdown("_No references collected._").classes("results-panel text-sm")
 
             with ui.tab_panel(tab_downloads):
-                ui.markdown("_No downloads available._").classes("results-panel text-sm")
+                ui_state.downloads_container = ui.column().classes("w-full gap-2")
+                with ui_state.downloads_container:
+                    ui.markdown("_No downloads available._").classes("results-panel text-sm")
 
             with ui.tab_panel(tab_logs):
                 ui_state.log_view = ui.log().classes("w-full log-view h-64")

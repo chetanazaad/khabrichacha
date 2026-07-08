@@ -92,3 +92,35 @@ class KnowledgeGraph:
             "claims": [c.model_dump() for c in self.claims],
             "relations": [r.model_dump() for r in self.relations]
         }
+
+    def build_from_findings(self, findings: List[str], mission: str) -> None:
+        """Parses findings to build the graph entities and claims."""
+        for text in findings:
+            if not text.strip():
+                continue
+            claim_id = f"claim_{len(self.claims) + 1}"
+            claim = Claim(
+                claim_id=claim_id,
+                statement=text,
+                confidence=0.9,
+                source_url="collected_data"
+            )
+            self.add_claim(claim)
+            
+            # Simple entity extraction heuristic
+            words = text.split()
+            for word in words:
+                clean_word = "".join(c for c in word if c.isalnum())
+                if clean_word and clean_word[0].isupper() and len(clean_word) > 2:
+                    entity = Entity(
+                        entity_id=f"ent_{clean_word.lower()}",
+                        name=clean_word,
+                        normalized_name=clean_word.lower(),
+                        entity_type="Concept",
+                        aliases=[clean_word]
+                    )
+                    self.add_entity(entity)
+
+    def export_graph(self) -> Dict[str, Any]:
+        """Alias for to_dict to serialize the graph."""
+        return self.to_dict()

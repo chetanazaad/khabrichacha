@@ -53,7 +53,7 @@ class ReportExporter:
         research_state: Optional[Dict[str, Any]] = None,
         timeline: str = "",
     ) -> Dict[str, Any]:
-        """Produce all three report formats."""
+        """Produce all three report formats plus Word export."""
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -92,10 +92,18 @@ class ReportExporter:
         else:
             logger.warning("Skipping PDF generation — reportlab not available.")
 
+        # ── Word DOCX ────────────────────────────────────────
+        report_docx_bytes = self._build_docx(
+            title=title, mission=mission, provider=provider,
+            model=model, findings=findings, sources=sources,
+            evidence=evidence, timeline=timeline, timestamp=timestamp,
+        )
+
         return {
             "report_md": report_md,
             "report_json": report_json,
             "report_pdf_bytes": report_pdf_bytes,
+            "report_docx_bytes": report_docx_bytes,
         }
 
     # ── Markdown builder ─────────────────────────────────────
@@ -165,6 +173,27 @@ class ReportExporter:
         *, title, mission, provider, model, findings,
         sources, evidence, timeline, timestamp,
     ) -> bytes:
+        import html
+        def esc(val):
+            if not val:
+                return ""
+            return html.escape(str(val))
+
+        title_esc = esc(title)
+        mission_esc = esc(mission)
+        provider_esc = esc(provider)
+        model_esc = esc(model)
+        timestamp_esc = esc(timestamp)
+        timeline_esc = esc(timeline)
+        findings_esc = [esc(f) for f in findings]
+        evidence_esc = esc(evidence)
+        sources_esc = []
+        for s in sources:
+            sources_esc.append({
+                "title": esc(s.get("title", "Untitled")),
+                "url": esc(s.get("url", ""))
+            })
+
         buf = BytesIO()
         doc = SimpleDocTemplate(
             buf, pagesize=A4,
@@ -207,16 +236,16 @@ class ReportExporter:
 
         # ── Cover Page ───────────────────────────────────────
         story.append(Spacer(1, 6 * cm))
-        story.append(Paragraph(title, styles["CoverTitle"]))
+        story.append(Paragraph(title_esc, styles["CoverTitle"]))
         story.append(Spacer(1, 0.5 * cm))
-        story.append(Paragraph(f"Research Mission: {mission or 'N/A'}", styles["CoverSub"]))
-        story.append(Paragraph(f"Generated: {timestamp}", styles["CoverSub"]))
-        story.append(Paragraph(f"Provider: {provider or 'N/A'}  |  Model: {model or 'N/A'}", styles["CoverSub"]))
+        story.append(Paragraph(f"Research Mission: {mission_esc}", styles["CoverSub"]))
+        story.append(Paragraph(f"Generated: {timestamp_esc}", styles["CoverSub"]))
+        story.append(Paragraph(f"Provider: {provider_esc}  |  Model: {model_esc}", styles["CoverSub"]))
         story.append(PageBreak())
 
         # ── Executive Summary ────────────────────────────────
         story.append(Paragraph("Executive Summary", styles["SectionHead"]))
-        summary_points = [s.strip().rstrip(".") + "." for s in findings[:3] if s.strip()]
+        summary_points = [s.strip().rstrip(".") + "." for s in findings_esc[:3] if s.strip()]
         if summary_points:
             summary_text = (
                 "This report consolidates key research findings. "
@@ -229,23 +258,23 @@ class ReportExporter:
 
         # ── Methodology ──────────────────────────────────────
         story.append(Paragraph("Methodology", styles["SectionHead"]))
-        story.append(Paragraph(f"<b>Provider:</b> {provider or 'N/A'}", styles["BodyText2"]))
-        story.append(Paragraph(f"<b>Model:</b> {model or 'N/A'}", styles["BodyText2"]))
-        story.append(Paragraph(f"<b>Generated:</b> {timestamp}", styles["BodyText2"]))
+        story.append(Paragraph(f"<b>Provider:</b> {provider_esc}", styles["BodyText2"]))
+        story.append(Paragraph(f"<b>Model:</b> {model_esc}", styles["BodyText2"]))
+        story.append(Paragraph(f"<b>Generated:</b> {timestamp_esc}", styles["BodyText2"]))
         story.append(Spacer(1, 0.3 * cm))
 
         # ── Research Timeline ────────────────────────────────
-        if timeline:
+        if timeline_esc:
             story.append(Paragraph("Research Timeline", styles["SectionHead"]))
-            for line in timeline.split("\n"):
+            for line in timeline_esc.split("\n"):
                 if line.strip():
                     story.append(Paragraph(line.strip(), styles["BodyText2"]))
             story.append(Spacer(1, 0.3 * cm))
 
         # ── Key Findings ─────────────────────────────────────
         story.append(Paragraph("Key Findings", styles["SectionHead"]))
-        if findings:
-            for i, f in enumerate(findings, 1):
+        if findings_esc:
+            for i, f in enumerate(findings_esc, 1):
                 # Truncate extremely long findings for the PDF
                 text = f[:500] + "..." if len(f) > 500 else f
                 story.append(Paragraph(f"{i}. {text}", styles["BulletItem"]))
@@ -254,10 +283,10 @@ class ReportExporter:
         story.append(Spacer(1, 0.3 * cm))
 
         # ── Evidence Summary ─────────────────────────────────
-        if evidence:
+        if evidence_esc:
             story.append(Paragraph("Evidence Summary", styles["SectionHead"]))
             # Keep evidence reasonable for the PDF
-            ev_text = evidence[:2000] + "..." if len(evidence) > 2000 else evidence
+            ev_text = evidence_esc[:2000] + "..." if len(evidence_esc) > 2000 else evidence_esc
             for line in ev_text.split("\n"):
                 if line.strip():
                     story.append(Paragraph(line.strip(), styles["BodyText2"]))
@@ -267,9 +296,9 @@ class ReportExporter:
         story.append(Paragraph("Evidence Statistics", styles["SectionHead"]))
         stats_data = [
             ["Metric", "Value"],
-            ["Total Findings", str(len(findings))],
-            ["Total Sources", str(len(sources))],
-            ["Generated", timestamp],
+            ["Total Findings", str(len(findings_esc))],
+            ["Total Sources", str(len(sources_esc))],
+            ["Generated", timestamp_esc],
         ]
         stats_table = Table(stats_data, colWidths=[8 * cm, 8 * cm])
         stats_table.setStyle(TableStyle([
@@ -288,8 +317,8 @@ class ReportExporter:
 
         # ── References ───────────────────────────────────────
         story.append(Paragraph("References", styles["SectionHead"]))
-        if sources:
-            for s in sources:
+        if sources_esc:
+            for s in sources_esc:
                 t = s.get("title", "Untitled")
                 u = s.get("url", "")
                 ref_text = f"<b>{t}</b>"
@@ -302,3 +331,126 @@ class ReportExporter:
         # ── Build ────────────────────────────────────────────
         doc.build(story)
         return buf.getvalue()
+
+    # ── Word DOCX builder ────────────────────────────────────
+
+    @staticmethod
+    def _build_docx(
+        *, title, mission, provider, model, findings,
+        sources, evidence, timeline, timestamp,
+    ) -> Optional[bytes]:
+        try:
+            import docx
+            from docx import Document
+            from docx.shared import Pt, RGBColor
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+        except ImportError:
+            logger.warning("python-docx not installed — skipping Word export.")
+            return None
+            
+        doc = Document()
+        
+        # Styles / Fonts
+        style_normal = doc.styles['Normal']
+        font = style_normal.font
+        font.name = 'Arial'
+        font.size = Pt(10.5)
+        font.color.rgb = RGBColor(0x33, 0x33, 0x33)
+        
+        # Document Title
+        p_title = doc.add_paragraph()
+        p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run_title = p_title.add_run(title)
+        run_title.font.size = Pt(26)
+        run_title.font.bold = True
+        run_title.font.color.rgb = RGBColor(0x1a, 0x1a, 0x2e)
+        
+        # Subtitle
+        p_sub = doc.add_paragraph()
+        p_sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run_sub = p_sub.add_run(f"Research Mission: {mission or 'N/A'}\nGenerated: {timestamp}\nProvider: {provider or 'N/A'} | Model: {model or 'N/A'}")
+        run_sub.font.size = Pt(11)
+        run_sub.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+        
+        doc.add_page_break()
+        
+        # Executive Summary Section
+        h_exec = doc.add_paragraph()
+        run_h_exec = h_exec.add_run("Executive Summary")
+        run_h_exec.font.size = Pt(16)
+        run_h_exec.font.bold = True
+        run_h_exec.font.color.rgb = RGBColor(0x16, 0x21, 0x3e)
+        
+        summary_points = [s.strip().rstrip(".") + "." for s in findings[:3] if s.strip()]
+        summary_text = (
+            "This report consolidates key research findings. "
+            "Highlights include: " + " ".join(summary_points)
+        ) if summary_points else "No conclusive findings were recorded."
+        doc.add_paragraph(summary_text)
+        
+        # Methodology Section
+        h_meth = doc.add_paragraph()
+        run_h_meth = h_meth.add_run("Methodology")
+        run_h_meth.font.size = Pt(16)
+        run_h_meth.font.bold = True
+        run_h_meth.font.color.rgb = RGBColor(0x16, 0x21, 0x3e)
+        
+        doc.add_paragraph(f"Provider: {provider or 'N/A'}\nModel: {model or 'N/A'}\nGenerated: {timestamp}")
+        
+        # Timeline Section
+        if timeline:
+            h_time = doc.add_paragraph()
+            run_h_time = h_time.add_run("Research Timeline")
+            run_h_time.font.size = Pt(16)
+            run_h_time.font.bold = True
+            run_h_time.font.color.rgb = RGBColor(0x16, 0x21, 0x3e)
+            doc.add_paragraph(timeline)
+            
+        # Key Findings Section
+        h_find = doc.add_paragraph()
+        run_h_find = h_find.add_run("Key Findings")
+        run_h_find.font.size = Pt(16)
+        run_h_find.font.bold = True
+        run_h_find.font.color.rgb = RGBColor(0x16, 0x21, 0x3e)
+        
+        if findings:
+            for i, f in enumerate(findings, 1):
+                p = doc.add_paragraph(style='List Bullet')
+                run = p.add_run(f"{i}. {f}")
+                run.font.size = Pt(10.5)
+        else:
+            doc.add_paragraph("No findings provided.")
+            
+        # Evidence Section
+        if evidence:
+            h_ev = doc.add_paragraph()
+            run_h_ev = h_ev.add_run("Evidence Summary")
+            run_h_ev.font.size = Pt(16)
+            run_h_ev.font.bold = True
+            run_h_ev.font.color.rgb = RGBColor(0x16, 0x21, 0x3e)
+            doc.add_paragraph(evidence)
+            
+        # References Section
+        h_ref = doc.add_paragraph()
+        run_h_ref = h_ref.add_run("References")
+        run_h_ref.font.size = Pt(16)
+        run_h_ref.font.bold = True
+        run_h_ref.font.color.rgb = RGBColor(0x16, 0x21, 0x3e)
+        
+        if sources:
+            for s in sources:
+                p = doc.add_paragraph(style='List Bullet')
+                run_t = p.add_run(s.get("title", "Untitled"))
+                run_t.font.bold = True
+                if s.get("url"):
+                    run_u = p.add_run(f" ({s.get('url')})")
+                    run_u.font.italic = True
+                    run_u.font.color.rgb = RGBColor(0x55, 0x55, 0x88)
+        else:
+            doc.add_paragraph("No references collected.")
+            
+        # Save to buffer
+        buf = BytesIO()
+        doc.save(buf)
+        return buf.getvalue()
+

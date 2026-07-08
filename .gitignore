@@ -50,4 +50,5 @@ projects/*
 !projects/.gitkeep
 logs/*
 !logs/.gitkeep
-workspace/
+/workspace/
+

@@ -19,7 +19,7 @@ from deployment.runtime.models.research_result import ResearchResult
 from deployment.runtime.models.research_statistics import ResearchStatistics
 from deployment.runtime.models.error_info import ErrorInfo
 from deployment.config_loader import load_config
-from deployment.runtime.event_bus import EventBus
+from deployment.runtime.event_bus import EventBus, ResearchEvent
 from deployment.runtime.tool_executor import ToolExecutor
 from deployment.workspace.workspace_manager import WorkspaceManager
 from khabrichacha.core.session import Session
@@ -51,7 +51,10 @@ from deployment.runtime.intelligence.model_selector import ModelSelector
 from deployment.runtime.intelligence.failure_recovery import FailureRecovery
 from deployment.runtime.response_planner import ResponsePlanner, ResponsePlan
 from deployment.runtime.advanced_result_builder import AdvancedResultBuilder
+from deployment.runtime.intelligence.citation_builder import CitationBuilder
 from deployment.runtime.intelligence.execution_trace import ExecutionTraceRecorder
+
+
 
 
 class ResearchController:
@@ -89,6 +92,10 @@ class ResearchController:
         self._llm_manager = LLMManager(self._llm_config)
         profiler.record_init("LLMManager", "ResearchController", "Singleton", (time.time() - t0) * 1000)
 
+        self._query_classifier = QueryClassifier()
+        import threading
+        self._cancel_event = threading.Event()
+
     def _get_provider(self, request: ResearchRequest):
         """Get a validated LLM provider for the given request, using the singleton LLMManager."""
         if "providers" not in self._llm_config:
@@ -96,10 +103,15 @@ class ResearchController:
         self._llm_config["providers"][request.provider] = {"model": request.model}
 
         provider_obj = self._llm_manager.get_provider(request.provider)
-        actual_model = getattr(provider_obj, "model", None) or getattr(provider_obj, "model_name", None)
+        actual_model = provider_obj.model_identifier
         if actual_model != request.model:
             raise ValueError(f"Model mismatch: requested '{request.model}', but provider instantiated '{actual_model}'")
         return provider_obj
+
+    def stop(self):
+        """Signals the active research task to cancel execution."""
+        logger.info("Cancellation signal received by ResearchController.")
+        self._cancel_event.set()
 
     def enforce_prompt_budget(self, prompt: str, max_tokens: int) -> str:
         # safe approximation: 1 token ≈ 4 characters.
@@ -183,12 +195,12 @@ class ResearchController:
         """
         Main entry point for UI or CLI. Classifies query and dispatches to appropriate strategy handler.
         """
+        self._cancel_event.clear()
         start_time = time.time()
         
         # 1. Classify Query
         class_start = time.time()
-        classifier = QueryClassifier()
-        strategy = classifier.classify(request.mission, request.strategy_override)
+        strategy = self._query_classifier.classify(request.mission, request.strategy_override)
         class_time = time.time() - class_start
         
         # Provider & Model Validation
@@ -201,6 +213,10 @@ class ResearchController:
         if request.model not in models_list:
             suggested = self.provider_manager.get_available_models()
             raise ValueError(f"Model '{request.model}' is not available on provider '{request.provider}'.\nSuggested models:\n" + "\n".join(suggested))
+        
+        if "providers" not in self._llm_config:
+            self._llm_config["providers"] = {}
+        self._llm_config["providers"][request.provider] = {"model": request.model}
         
         tracer = ExecutionTraceRecorder()
         tracer.set_query_info(request.mission, strategy.strategy_name, strategy.confidence, strategy.complexity)
@@ -297,31 +313,42 @@ class ResearchController:
             return final_result
             
         except Exception as e:
+            import traceback
             logger.error(f"ResearchController execution error: {e}", exc_info=True)
             result.success = False
+            result.errors.append(ErrorInfo(
+                code="EXECUTION_ERROR",
+                component="ResearchController",
+                message=str(e),
+                details=traceback.format_exc(),
+                recoverable=False
+            ))
             return result
 
-    def _setup_session(self, request: ResearchRequest, strategy: Any, result: ResearchResult, tracer: ExecutionTraceRecorder) -> None:
+    def _setup_session(self, request: ResearchRequest, strategy: Any, result: ResearchResult, tracer: ExecutionTraceRecorder):
         """Sets up the session (temporary or persistent) based on the strategy."""
         is_temp_session = (
             strategy.strategy_name not in ["RESEARCH", "DEEP_RESEARCH"]
             and not request.metadata.get("project_mode", False)
             and not request.project_id
         )
+        from deployment.workspace.project_manager import ProjectManager
+        pm = ProjectManager(self.workspace_manager)
+        
         if is_temp_session:
-            import uuid
-            import os
-            # Memory / Temporary Session
-            result.project_id = f"temp_session_{uuid.uuid4().hex[:8]}"
+            manifest = pm.create_project(
+                title=f"Research: {request.mission[:30]}",
+                mission=request.mission,
+                provider=request.provider,
+                model=request.model,
+                research_depth=strategy.strategy_name.lower(),
+                is_temp=True
+            )
+            result.project_id = manifest.project_id
             result.project_path = str(self.workspace_manager.temp / result.project_id)
-            os.makedirs(result.project_path, exist_ok=True)
-            for sub in ["logs", "cache", "references"]:
-                os.makedirs(os.path.join(result.project_path, sub), exist_ok=True)
             tracer.project_path = result.project_path
         else:
             # Persistent Session via ProjectManager
-            from deployment.workspace.project_manager import ProjectManager
-            pm = ProjectManager(self.workspace_manager)
             manifest = pm.create_project(
                 title=f"Research: {request.mission[:30]}",
                 mission=request.mission,
@@ -333,6 +360,9 @@ class ResearchController:
             result.project_id = manifest.project_id
             result.project_path = str(self.workspace_manager.get_project_path(manifest.project_id))
             tracer.project_path = result.project_path
+            pm.lock_project(manifest.project_id)
+            
+        return pm, manifest, is_temp_session
 
     # ── Dispatch Handlers ─────────────────────────────────────
 
@@ -342,7 +372,7 @@ class ResearchController:
         tracer.record_module("Planner", skipped=True, reason="Strategy FAST bypasses planner.")
         tracer.record_module("Retriever", skipped=True, reason="Strategy FAST bypasses web search.")
         
-        self._setup_session(request, strategy, result, tracer)
+        pm, manifest, is_temp = self._setup_session(request, strategy, result, tracer)
 
         reasoning_start = time.time()
         
@@ -356,9 +386,16 @@ class ResearchController:
             result.statistics.reasoning_time = time.time() - reasoning_start
             result.elapsed_time = time.time() - start_time
             result.statistics.elapsed_time = result.elapsed_time
+            self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Fast answer resolved via local cache.", metadata={"progress": 1.0}))
+            return result
+
+        if self._cancel_event.is_set():
+            result.success = False
+            result.errors.append(ErrorInfo(code="CANCELLED", component="Controller", message="Task stopped by user."))
             return result
 
         # 2. LLM reasoning query
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Generating LLM response...", metadata={"progress": 0.5}))
         provider_obj = self._get_provider(request)
 
         # Prompt budget for FAST is 500 tokens
@@ -374,14 +411,16 @@ class ResearchController:
         result.statistics.reasoning_time = time.time() - reasoning_start
         result.elapsed_time = time.time() - start_time
         result.statistics.elapsed_time = result.elapsed_time
+        
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="FAST pipeline completed.", metadata={"progress": 1.0}))
         return result
 
     def _execute_lookup(self, request: ResearchRequest, strategy: Any, result: ResearchResult, start_time: float, tracer: ExecutionTraceRecorder) -> ResearchResult:
         """LOOKUP strategy: Web search only, direct answer with minimal reasoning."""
-        self.event_bus.info("Controller", "Executing LOOKUP pipeline...")
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Executing LOOKUP pipeline...", metadata={"progress": 0.1}))
         tracer.record_module("Planner", skipped=True, reason="Strategy LOOKUP bypasses planner.")
         
-        self._setup_session(request, strategy, result, tracer)
+        pm, manifest, is_temp = self._setup_session(request, strategy, result, tracer)
 
         retRetrieval_start = time.time()
         registry = self._tool_registry
@@ -396,6 +435,12 @@ class ResearchController:
             result.statistics.retrieval_time = time.time() - retRetrieval_start
             result.elapsed_time = time.time() - start_time
             result.statistics.elapsed_time = result.elapsed_time
+            self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Lookup resolved via local cache.", metadata={"progress": 1.0}))
+            return result
+
+        if self._cancel_event.is_set():
+            result.success = False
+            result.errors.append(ErrorInfo(code="CANCELLED", component="Controller", message="Task stopped by user."))
             return result
 
         # Small Question Fast Path Detection
@@ -405,7 +450,7 @@ class ResearchController:
         )
         
         if is_fast_path:
-            self.event_bus.info("Controller", "Executing Small Question Fast Path...")
+            self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Executing Small Question Fast Path...", metadata={"progress": 0.3}))
             tracer.record_module("FastPathLookup", execution_time_ms=0.0)
             
             # Search & fetch top source content
@@ -422,6 +467,11 @@ class ResearchController:
                 except:
                     top_source_text = top_src.snippet
             
+            if self._cancel_event.is_set():
+                result.success = False
+                result.errors.append(ErrorInfo(code="CANCELLED", component="Controller", message="Task stopped by user."))
+                return result
+
             # Simple direct answer prompt (Question + Top Source facts + Instructions)
             prompt = (
                 f"Question: {request.mission}\n\n"
@@ -430,6 +480,7 @@ class ResearchController:
             )
             prompt = self.enforce_prompt_budget(prompt, 1000)
             
+            self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Generating direct answer...", metadata={"progress": 0.7}))
             provider_obj = self._get_provider(request)
             ans = provider_obj.generate(prompt)
             tracer.record_llm_call(request.provider, request.model, len(prompt)/4, len(ans)/4)
@@ -446,14 +497,21 @@ class ResearchController:
             result.statistics.retrieval_time = time.time() - retRetrieval_start
             result.elapsed_time = time.time() - start_time
             result.statistics.elapsed_time = result.elapsed_time
+            self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="LOOKUP completed via fast path.", metadata={"progress": 1.0}))
             return result
 
         # 2. Run Retriever & deduplicate (Normal Lookup Path)
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Searching web for sources...", metadata={"progress": 0.3}))
         ret_start = time.time()
         retriever = Retriever(registry, strategy)
         ret_res = retriever.retrieve(request.mission, max_results=strategy.execution_budget.max_searches)
         tracer.record_module("Retriever", (time.time()-ret_start)*1000)
         tracer.record_retrieval(len(ret_res.filtered_sources), len(ret_res.duplicate_sources), 0, 0, 0, [])
+
+        if self._cancel_event.is_set():
+            result.success = False
+            result.errors.append(ErrorInfo(code="CANCELLED", component="Controller", message="Task stopped by user."))
+            return result
 
         if ret_res.extracted_answer:
             self.event_bus.info("Controller", f"Deterministic direct answer found: {ret_res.extracted_answer}")
@@ -467,6 +525,7 @@ class ResearchController:
             result.statistics.retrieval_time = time.time() - retRetrieval_start
             result.elapsed_time = time.time() - start_time
             result.statistics.elapsed_time = result.elapsed_time
+            self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="LOOKUP completed via deterministic extraction.", metadata={"progress": 1.0}))
             return result
 
         # Evidence Sufficiency check
@@ -477,20 +536,25 @@ class ResearchController:
             # Escalate LOOKUP query to ANALYSIS
             self.event_bus.info("Controller", "Evidence insufficient. Escalating LOOKUP to ANALYSIS...")
             from deployment.runtime.models.research_strategy import ResearchStrategy
-            escalated_strategy = classifier.classify(request.mission, strategy_override="ANALYSIS")
+            escalated_strategy = self._query_classifier.classify(request.mission, strategy_override="ANALYSIS")
             return self._execute_analysis(request, escalated_strategy, result, start_time, tracer)
-            
-        instructions = "Synthesize a concise answer based on the retrieved facts."
-        if sufficiency >= 80.0:
-            instructions = "Directly format the facts to answer the question. Bypasses heavy synthesis reasoning."
-            
-        snippets = [f"- **{s.title}** ({s.url}): {s.snippet}" for s in ret_res.filtered_sources]
+
+        if self._cancel_event.is_set():
+            result.success = False
+            result.errors.append(ErrorInfo(code="CANCELLED", component="Controller", message="Task stopped by user."))
+            return result
+
+        # 3. Fast extraction & LLM Synthesizer (General Lookup)
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Synthesizing direct answer...", metadata={"progress": 0.6}))
+        provider_obj = self._get_provider(request)
+        
+        snippets = [s.snippet for s in ret_res.filtered_sources]
+        instructions = "Provide a synthesized direct answer based on the facts provided."
         prompt = self.enforce_prompt_budget(
-            self.enforce_adaptive_prompt_budget(request.mission, snippets, instructions, 1000),
-            1000
+            self.enforce_adaptive_prompt_budget(request.mission, snippets, instructions, 2000),
+            2000
         )
         
-        provider_obj = self._get_provider(request)
         ans = provider_obj.generate(prompt)
         tracer.record_llm_call(request.provider, request.model, len(prompt)/4, len(ans)/4)
 
@@ -499,22 +563,23 @@ class ResearchController:
         
         result.direct_answer = ans + "\n\n" + cb.to_markdown(citations)
         result.success = True
-        result.strategy_confidence = sufficiency / 100.0
         result.source_count = len(ret_res.filtered_sources)
-        result.statistics.sources_downloaded = len(ret_res.filtered_sources)
+        result.statistics.sources_downloaded = 0
         result.statistics.search_time = ret_res.search_time
         result.statistics.dedup_time = ret_res.dedup_time
         result.statistics.retrieval_time = time.time() - retRetrieval_start
         result.elapsed_time = time.time() - start_time
         result.statistics.elapsed_time = result.elapsed_time
+        
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="LOOKUP completed.", metadata={"progress": 1.0}))
         return result
 
     def _execute_structured(self, request: ResearchRequest, strategy: Any, result: ResearchResult, start_time: float, tracer: ExecutionTraceRecorder) -> ResearchResult:
         """STRUCTURED strategy: Search → Fetch → extraction → table normalizing. Bypasses planner."""
-        self.event_bus.info("Controller", "Executing STRUCTURED pipeline...")
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Executing STRUCTURED pipeline...", metadata={"progress": 0.1}))
         tracer.record_module("Planner", skipped=True, reason="Strategy STRUCTURED bypasses planner.")
         
-        self._setup_session(request, strategy, result, tracer)
+        pm, manifest, is_temp = self._setup_session(request, strategy, result, tracer)
         
         # 1. Run Search & Fetch
         registry = self._tool_registry
@@ -525,20 +590,107 @@ class ResearchController:
         tracer.record_module("Retriever", (time.time()-ret_start)*1000)
         tracer.record_retrieval(len(ret_res.filtered_sources), len(ret_res.duplicate_sources), 0, 0, 0, [])
         
+        if self._cancel_event.is_set():
+            result.success = False
+            result.errors.append(ErrorInfo(code="CANCELLED", component="Controller", message="Task stopped by user."))
+            return result
+
         # Fetch top trusted sources
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Fetching trusted sources...", metadata={"progress": 0.3}))
         fetch_tool = registry.get_tool("fetch_page")
         fetched_docs = []
         
         # Limit fetches based on budget
         limit = strategy.execution_budget.max_fetches
         for src in ret_res.filtered_sources[:limit]:
+            if self._cancel_event.is_set():
+                break
             try:
                 res = fetch_tool.execute({"url": src.url})
                 if isinstance(res, dict) and res.get("content"):
+                    res["trust_score"] = src.trust_score
+                    res["url"] = src.url
                     fetched_docs.append(res)
             except Exception:
                 pass
-                
+
+        if self._cancel_event.is_set():
+            result.success = False
+            result.errors.append(ErrorInfo(code="CANCELLED", component="Controller", message="Task stopped by user."))
+            return result
+
+        # Run Consensus Engine on the fetched documents
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Analyzing numerical consensus...", metadata={"progress": 0.5}))
+        source_values = []
+        provider_obj = self._get_provider(request)
+        for doc in fetched_docs:
+            if self._cancel_event.is_set():
+                break
+            url = doc.get("url", "Unknown")
+            trust = doc.get("trust_score", 50.0)
+            content = doc.get("content", "")[:4000] # Limit content size for LLM call
+            
+            # Ask LLM to extract the specific value
+            extract_prompt = (
+                f"Task: Extract the numerical value answering the query: '{request.mission}' from the text below.\n\n"
+                f"Text:\n{content}\n\n"
+                "Instructions: Find the exact numeric value (as a float/integer) that represents the answer. "
+                "Return ONLY a JSON object in this format (do not wrap in markdown code blocks, do not include any other text):\n"
+                "{\"value\": <float or null>, \"description\": \"<description of value>\"}"
+            )
+            try:
+                response_text = provider_obj.generate(extract_prompt)
+                response_text = response_text.strip()
+                if response_text.startswith("```"):
+                    response_text = re.sub(r'^```(?:json)?\n|```$', '', response_text, flags=re.MULTILINE).strip()
+                parsed = json.loads(response_text)
+                val = parsed.get("value")
+                desc = parsed.get("description", "")
+                if val is not None:
+                    try:
+                        val_float = float(val)
+                        source_values.append({
+                            "source_name": url,
+                            "value": val_float,
+                            "weight": trust / 100.0,
+                            "description": desc
+                        })
+                    except (ValueError, TypeError):
+                        pass
+            except Exception as e:
+                logger.warning(f"Failed to extract consensus value from {url}: {e}")
+
+        consensus_md = ""
+        consensus_score_val = 0.0
+        if source_values:
+            ce = ConsensusEngine()
+            consensus_result = ce.verify_numerical(request.mission, source_values)
+            if consensus_result and consensus_result.resolution != "unresolved":
+                consensus_score_val = consensus_result.confidence
+                consensus_md = (
+                    f"### Consensus Verification\n"
+                    f"- **Resolved Value**: {consensus_result.weighted_value}\n"
+                    f"- **Resolution Strategy**: {consensus_result.resolution.replace('_', ' ').title()}\n"
+                    f"- **Confidence Score**: {consensus_result.confidence:.0%}\n"
+                    f"- **Agreement**: {consensus_result.agreement_percentage:.1f}% of sources agree\n\n"
+                    f"#### Sources in Agreement\n"
+                )
+                for src in consensus_result.agreeing_sources:
+                    consensus_md += f"- [{src}]({src})\n"
+                if consensus_result.conflicting_sources:
+                    consensus_md += f"\n#### Conflicting Sources\n"
+                    for conflict in consensus_result.conflicts:
+                        src = conflict["source"]
+                        val = conflict["value"]
+                        diff = conflict["difference"]
+                        consensus_md += f"- [{src}]({src}): Value = {val} (Difference = {diff:.2f})\n"
+                consensus_md += "\n---\n"
+
+        result.retrieval_stats["consensus_score"] = consensus_score_val
+        avg_trust = sum(s.trust_score for s in ret_res.filtered_sources) / len(ret_res.filtered_sources) if ret_res.filtered_sources else 50.0
+        result.retrieval_stats["avg_trust_score"] = avg_trust
+        result.output_format = "table"
+
         # Structured resolver gate: check if tables or structured numbers exist
         import re
         has_structured = False
@@ -554,8 +706,10 @@ class ResearchController:
                 has_structured = True
                 break
 
+        structured_docs = []
         if has_structured:
             # 2. Extract Structured data using StructuredResolver (Smart LLM Bypass)
+            self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Extracting structured tables...", metadata={"progress": 0.7}))
             from deployment.runtime.intelligence.structured_resolver import StructuredResolver
             sr_start = time.time()
             resolver = StructuredResolver()
@@ -579,9 +733,13 @@ class ResearchController:
             else:
                 content = {"text": "No structured data tables could be successfully extracted from sources."}
                 
-            ans = builder.build(plan, content, citations)
+            ans = builder.build(plan, content, []) # Build without citations first
+            if consensus_md:
+                ans = consensus_md + "\n" + ans
+            if citations:
+                ans = ans + "\n\n" + cb.to_markdown(citations)
         else:
-            self.event_bus.info("Controller", "No structured tables detected. Downgrading to normal synthesis...")
+            self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="No structured tables detected. Synthesizing summary...", metadata={"progress": 0.7}))
             tracer.record_module("StructuredResolver", skipped=True, reason="No tables detected in retrieved documents.")
             
             # Normal synthesis fallback
@@ -591,12 +749,13 @@ class ResearchController:
                 self.enforce_adaptive_prompt_budget(request.mission, snippets, instructions, 2000),
                 2000
             )
-            provider_obj = self._get_provider(request)
             ans = provider_obj.generate(prompt)
             tracer.record_llm_call(request.provider, request.model, len(prompt)/4, len(ans)/4)
 
             cb = CitationBuilder()
             citations = cb.build([s.model_dump() for s in ret_res.filtered_sources])
+            if consensus_md:
+                ans = consensus_md + "\n" + ans
             ans = ans + "\n\n" + cb.to_markdown(citations)
 
         result.direct_answer = ans
@@ -609,19 +768,21 @@ class ResearchController:
             report_md=ans,
             report_json={"answer": ans, "tables": [d.model_dump() for d in structured_docs] if has_structured else []}
         )
-        pm.update_manifest(manifest.project_id, status="completed")
-        pm.unlock_project(manifest.project_id)
+        if not is_temp:
+            pm.update_manifest(manifest.project_id, status="completed")
+            pm.unlock_project(manifest.project_id)
         
         result.elapsed_time = time.time() - start_time
         result.statistics.elapsed_time = result.elapsed_time
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="STRUCTURED pipeline completed.", metadata={"progress": 1.0}))
         return result
 
     def _execute_comparison(self, request: ResearchRequest, strategy: Any, result: ResearchResult, start_time: float, tracer: ExecutionTraceRecorder) -> ResearchResult:
         """COMPARISON strategy: Parallel search + comparison matrix, no planner."""
-        self.event_bus.info("Controller", "Executing COMPARISON pipeline...")
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Executing COMPARISON pipeline...", metadata={"progress": 0.1}))
         tracer.record_module("Planner", skipped=True, reason="Strategy COMPARISON bypasses planner.")
         
-        self._setup_session(request, strategy, result, tracer)
+        pm, manifest, is_temp = self._setup_session(request, strategy, result, tracer)
 
         # Map subtasks
         decomposer = QueryDecomposer()
@@ -635,24 +796,35 @@ class ResearchController:
         
         # Simple execution of comparison entities
         ret_start = time.time()
-        for sub in dq.subtasks[:2]:
-            self.event_bus.info("Controller", f"Running comparison query task: {sub.description}")
+        for idx, sub in enumerate(dq.subtasks[:2]):
+            if self._cancel_event.is_set():
+                break
+            self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message=f"Running comparison subquery: {sub.description}", metadata={"progress": 0.2 + idx*0.2}))
             retriever = Retriever(registry, strategy)
             ret_res = retriever.retrieve(sub.description, max_results=3)
             retrieved_sources.extend([s.model_dump() for s in ret_res.filtered_sources])
             
             # Fetch content
             for src in ret_res.filtered_sources[:2]:
+                if self._cancel_event.is_set():
+                    break
                 try:
                     res = registry.get_tool("fetch_page").execute({"url": src.url})
                     if isinstance(res, dict) and res.get("content"):
                         findings.append(res.get("content")[:1000]) # Keep snippets
                 except:
                     pass
+                    
         tracer.record_module("Retriever", (time.time()-ret_start)*1000)
         tracer.record_retrieval(len(retrieved_sources), 0, 0, 0, 0, [])
                     
+        if self._cancel_event.is_set():
+            result.success = False
+            result.errors.append(ErrorInfo(code="CANCELLED", component="Controller", message="Task stopped by user."))
+            return result
+
         # LLM Reasoning comparison synthesis
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Synthesizing comparison matrix...", metadata={"progress": 0.6}))
         provider_obj = self._get_provider(request)
 
         # COMPARISON prompt budget is 3000 tokens
@@ -672,29 +844,50 @@ class ResearchController:
         
         result.direct_answer = ans
         result.success = True
+        
+        # Save project
+        pm.save_project(
+            manifest.project_id,
+            report_md=ans,
+            report_json={"answer": ans}
+        )
+        if not is_temp:
+            pm.update_manifest(manifest.project_id, status="completed")
+            pm.unlock_project(manifest.project_id)
+            
         result.elapsed_time = time.time() - start_time
         result.statistics.elapsed_time = result.elapsed_time
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="COMPARISON completed.", metadata={"progress": 1.0}))
         return result
 
     def _execute_analysis(self, request: ResearchRequest, strategy: Any, result: ResearchResult, start_time: float, tracer: ExecutionTraceRecorder) -> ResearchResult:
         """ANALYSIS strategy: Search → Fetch → LLM reasoning, no planner, no report."""
-        self.event_bus.info("Controller", "Executing ANALYSIS reasoning pipeline...")
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Executing ANALYSIS reasoning pipeline...", metadata={"progress": 0.1}))
         tracer.record_module("Planner", skipped=True, reason="Strategy ANALYSIS bypasses planner.")
         
-        self._setup_session(request, strategy, result, tracer)
+        pm, manifest, is_temp = self._setup_session(request, strategy, result, tracer)
 
         registry = self._tool_registry
         
         # Retriever & Rank
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Searching web for sources...", metadata={"progress": 0.2}))
         ret_start = time.time()
         retriever = Retriever(registry, strategy)
         ret_res = retriever.retrieve(request.mission)
         tracer.record_module("Retriever", (time.time()-ret_start)*1000)
         tracer.record_retrieval(len(ret_res.filtered_sources), len(ret_res.duplicate_sources), 0, 0, 0, [])
         
+        if self._cancel_event.is_set():
+            result.success = False
+            result.errors.append(ErrorInfo(code="CANCELLED", component="Controller", message="Task stopped by user."))
+            return result
+
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Fetching source contents...", metadata={"progress": 0.4}))
         fetched_text = []
         limit = strategy.execution_budget.max_fetches
         for src in ret_res.filtered_sources[:limit]:
+            if self._cancel_event.is_set():
+                break
             try:
                 res = registry.get_tool("fetch_page").execute({"url": src.url})
                 if isinstance(res, dict) and res.get("content"):
@@ -702,6 +895,11 @@ class ResearchController:
             except:
                 pass
                 
+        if self._cancel_event.is_set():
+            result.success = False
+            result.errors.append(ErrorInfo(code="CANCELLED", component="Controller", message="Task stopped by user."))
+            return result
+
         # Optimize context size: ANALYSIS prompt budget is 6000 tokens
         opt_start = time.time()
         optimizer = ContextOptimizer()
@@ -709,6 +907,7 @@ class ResearchController:
         tracer.record_module("ContextOptimizer", (time.time()-opt_start)*1000)
         
         # LLM Call
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="Analyzing context information...", metadata={"progress": 0.7}))
         provider_obj = self._get_provider(request)
 
         instructions = "Analyze the context information and answer the query comprehensively, resolving contradictions."
@@ -728,8 +927,20 @@ class ResearchController:
         result.direct_answer = ans
         result.success = True
         result.source_count = len(fetched_text)
+        
+        # Save project
+        pm.save_project(
+            manifest.project_id,
+            report_md=ans,
+            report_json={"answer": ans}
+        )
+        if not is_temp:
+            pm.update_manifest(manifest.project_id, status="completed")
+            pm.unlock_project(manifest.project_id)
+
         result.elapsed_time = time.time() - start_time
         result.statistics.elapsed_time = result.elapsed_time
+        self.event_bus.publish(ResearchEvent(level="INFO", component="Controller", message="ANALYSIS completed.", metadata={"progress": 1.0}))
         return result
 
     def _execute_research(self, request: ResearchRequest, strategy: Any, result: ResearchResult, start_time: float, tracer: ExecutionTraceRecorder) -> ResearchResult:
@@ -792,7 +1003,7 @@ class ResearchController:
 
         llm_manager = LLMManager(session.config)
         provider_obj = llm_manager.get_provider(request.provider)
-        actual_model = getattr(provider_obj, "model", None) or getattr(provider_obj, "model_name", None)
+        actual_model = provider_obj.model_identifier
         if actual_model != request.model:
             raise ValueError(f"Model mismatch: requested '{request.model}', but provider instantiated '{actual_model}'.")
             
@@ -801,7 +1012,10 @@ class ResearchController:
         orchestrator = Orchestrator(
             session=session,
             llm_manager=llm_manager,
-            tool_registry=executor
+            tool_registry=executor,
+            tracer=tracer,
+            adaptive_enabled=enable_adaptive,
+            cancel_event=self._cancel_event
         )
         
         self.event_bus.info("Orchestrator", "Starting execution phase")
@@ -907,6 +1121,7 @@ class ResearchController:
             report_md=exports["report_md"],
             report_json=exports["report_json"],
             report_pdf_bytes=exports.get("report_pdf_bytes"),
+            report_docx_bytes=exports.get("report_docx_bytes"),
         )
         pm.unlock_project(project_id)
         
@@ -917,6 +1132,8 @@ class ResearchController:
             result.report_json_path = os.path.join(result.project_path, "report.json")
         if "pdf" in request.output_formats:
             result.report_pdf_path = os.path.join(result.project_path, "report.pdf")
+        if "docx" in request.output_formats or not request.output_formats:
+            result.report_docx_path = os.path.join(result.project_path, "report.docx")
 
         result.iterations = session.research_state.get("iteration", 0)
         result.evidence_count = len(findings)

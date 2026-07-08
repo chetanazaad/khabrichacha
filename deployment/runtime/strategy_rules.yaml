@@ -209,11 +209,22 @@ classification:
     - "population"
     - "election results"
     - "financial statement"
+    - "financial"
+    - "financials"
     - "statistics"
     - "data"
     - "table"
     - "figures"
     - "annual report"
+    - "total number of"
+    - "how many"
+    - "cumulative"
+    - "worldwide"
+    - "to date"
+    - "accident"
+    - "accidents"
+    - "total"
+
 
   comparison_patterns:
     - " vs "

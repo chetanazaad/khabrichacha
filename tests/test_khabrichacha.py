@@ -52,7 +52,8 @@ def test_llm_manager():
         },
         "providers": {
             "openai": {
-                "model": "gpt-4"
+                "model": "gpt-4",
+                "api_key": "test-key"
             }
         }
     }

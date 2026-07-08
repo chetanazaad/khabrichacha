@@ -59,6 +59,28 @@ class FetchPageTool(BaseTool):
             url_str = urls.get("url") if isinstance(urls, dict) else str(urls)
             return self._fetch_single(url_str)
 
+    def _fetch_with_playwright(self, url: str) -> str:
+        """
+        Loads the webpage using Playwright sync API and returns the rendered HTML.
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+            logger.info(f"Launching Playwright Chromium for: '{url}'")
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                page.goto(url, timeout=20000, wait_until="load")
+                try:
+                    page.wait_for_timeout(3000) # wait 3s for JS execution
+                except Exception:
+                    pass
+                html_content = page.content()
+                browser.close()
+                return html_content
+        except Exception as e:
+            logger.error(f"Playwright fetch failed for {url}: {e}")
+            return ""
+
     def _fetch_single(self, url: str) -> Dict[str, str]:
         """
         Downloads a webpage and extracts clean readable article text.
@@ -87,6 +109,9 @@ class FetchPageTool(BaseTool):
             has_readability = False
             logger.warning("readability-lxml is not installed. Will fallback to BeautifulSoup.")
 
+        html_content = ""
+        used_playwright = False
+        
         try:
             response = requests.get(
                 url,
@@ -96,7 +121,25 @@ class FetchPageTool(BaseTool):
             response.raise_for_status()
             html_content = response.text
         except Exception as e:
-            logger.error(f"Network error while fetching URL '{url}': {e}")
+            logger.warning(f"Network error with requests while fetching URL '{url}': {e}. Trying Playwright fallback...")
+
+        # If requests failed or returned too little content, try Playwright
+        clean_text_len = 0
+        if html_content:
+            try:
+                soup = BeautifulSoup(html_content, "html.parser")
+                clean_text_len = len(soup.get_text(separator="\n").strip())
+            except Exception:
+                pass
+
+        if not html_content or clean_text_len < 500:
+            logger.info(f"Content too short ({clean_text_len} chars) or fetch failed. Trying Playwright fallback for {url}...")
+            pw_html = self._fetch_with_playwright(url)
+            if pw_html:
+                html_content = pw_html
+                used_playwright = True
+
+        if not html_content:
             return default_return
 
         title = ""
@@ -135,7 +178,7 @@ class FetchPageTool(BaseTool):
             if len(clean_text) > 10000:
                 clean_text = clean_text[:10000] + "\n...[TRUNCATED]"
                 
-            logger.info(f"Successfully extracted {len(clean_text)} characters from {url}")
+            logger.info(f"Successfully extracted {len(clean_text)} characters from {url} (Playwright used: {used_playwright})")
             
             return {
                 "url": url,

@@ -16,26 +16,6 @@ class Retriever:
         self.strategy = strategy
         self.deduplicator = Deduplicator()
         self.ranker = SourceRanker()
-
-    def retrieve(self, query: str, max_results: int = 10) -> RetrievalResult:
-        """
-        Runs search queries, merges, deduplicates, ranks, and returns structured RetrievalResult.
-        Does NOT download pages. Now uses Adaptive Parallel Retrieval and OfficialSourceResolver.
-        """
-        start_time = time.time()
-        
-        # 1. Determine which search tools to run based on strategy
-        search_tools = []
-        for t in self.strategy.enabled_tools:
-            if t in ["search_web", "search_news"] and self.tool_registry.has_tool(t):
-                search_tools.append(t)
-                
-        # Fallback to search_web if no search tools enabled/found
-        if not search_tools:
-            if self.tool_registry.has_tool("search_web"):
-                search_tools.append("search_web")
-            else:
-                logger.warning("No search tools available in the tool registry.")
                 
     def classify_intent(self, query: str) -> str:
         q = query.lower()

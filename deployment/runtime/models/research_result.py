@@ -14,6 +14,7 @@ class ResearchResult(BaseModel):
     report_md_path: str = ""
     report_json_path: str = ""
     report_pdf_path: str = ""
+    report_docx_path: str = ""
     statistics: ResearchStatistics = Field(default_factory=ResearchStatistics)
     evidence_count: int = 0
     source_count: int = 0

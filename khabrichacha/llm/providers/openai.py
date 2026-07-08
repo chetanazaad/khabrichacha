@@ -8,12 +8,16 @@ class OpenAIProvider(BaseLLMProvider):
         super().__init__(config)
         self.api_key = config.get("api_key") or os.getenv("OPENAI_API_KEY")
         self.model = config.get("model", "gpt-4o")
+        self.base_url = config.get("base_url") or os.getenv("OPENAI_BASE_URL")
         self.client = None
         
         if self.api_key:
             try:
                 from openai import OpenAI
-                self.client = OpenAI(api_key=self.api_key)
+                if self.base_url:
+                    self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+                else:
+                    self.client = OpenAI(api_key=self.api_key)
             except ImportError:
                 raise ValueError("openai package not installed. Cannot use OpenAIProvider.")
         else:

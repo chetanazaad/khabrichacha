@@ -6,6 +6,7 @@ class LLMManager:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.providers: Dict[str, Type[BaseLLMProvider]] = {}
+        self._provider_cache = {}
         self._register_default_providers()
 
     def register_provider(self, name: str, provider_cls: Type[BaseLLMProvider]):
@@ -18,11 +19,13 @@ class LLMManager:
         from khabrichacha.llm.providers.gemini import GeminiProvider
         from khabrichacha.llm.providers.ollama import OllamaProvider
         from khabrichacha.llm.providers.transformers import TransformersProvider
+        from khabrichacha.llm.providers.openrouter import OpenRouterProvider
 
         self.register_provider("openai", OpenAIProvider)
         self.register_provider("gemini", GeminiProvider)
         self.register_provider("ollama", OllamaProvider)
         self.register_provider("transformers", TransformersProvider)
+        self.register_provider("openrouter", OpenRouterProvider)
 
     def get_provider(self, name: Optional[str] = None) -> BaseLLMProvider:
         provider_name = name or self.config.get("llm", {}).get("default_provider", "openai")
@@ -37,6 +40,13 @@ class LLMManager:
         for key in ["temperature", "max_tokens"]:
             if key in llm_general and key not in provider_config:
                 provider_config[key] = llm_general[key]
+
+        model = provider_config.get("model") or provider_config.get("model_id") or ""
+        cache_key = (provider_name, model)
+        if cache_key in self._provider_cache:
+            return self._provider_cache[cache_key]
                 
         logger.info(f"Instantiated LLM provider: {provider_name}")
-        return provider_cls(provider_config)
+        provider_instance = provider_cls(provider_config)
+        self._provider_cache[cache_key] = provider_instance
+        return provider_instance

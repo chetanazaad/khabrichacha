@@ -35,3 +35,8 @@ pytest>=8.0.0
 
 # Report Export
 reportlab>=4.0.0
+python-docx>=1.1.0
+
+# Headless Browser
+playwright>=1.40.0
+

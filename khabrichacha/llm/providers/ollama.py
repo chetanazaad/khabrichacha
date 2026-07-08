@@ -8,6 +8,7 @@ class OllamaProvider(BaseLLMProvider):
         super().__init__(config)
         self.base_url = config.get("base_url", "http://localhost:11434")
         self.model = config.get("model", "llama3")
+        self.timeout = config.get("timeout", 120)
 
     def generate(self, prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
         logger.info(f"Ollama generate request for model {self.model} at {self.base_url}")
@@ -25,14 +26,14 @@ class OllamaProvider(BaseLLMProvider):
             payload["system"] = system_prompt
             
         try:
-            response = requests.post(url, json=payload, timeout=30)
+            response = requests.post(url, json=payload, timeout=self.timeout)
             if response.status_code == 200:
                 return response.json().get("response", "")
             else:
-                return f"Error: Ollama request failed with status code {response.status_code}: {response.text}"
+                raise RuntimeError(f"Ollama request failed with status code {response.status_code}: {response.text}")
         except Exception as e:
             logger.error(f"Ollama generate call failed: {e}")
-            return f"[Mock Ollama {self.model}] response to prompt: {prompt}"
+            raise e
 
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         logger.info(f"Ollama chat request for model {self.model} at {self.base_url}")
@@ -47,11 +48,11 @@ class OllamaProvider(BaseLLMProvider):
             }
         }
         try:
-            response = requests.post(url, json=payload, timeout=30)
+            response = requests.post(url, json=payload, timeout=self.timeout)
             if response.status_code == 200:
                 return response.json().get("message", {}).get("content", "")
             else:
-                return f"Error: Ollama chat failed with status code {response.status_code}: {response.text}"
+                raise RuntimeError(f"Ollama chat failed with status code {response.status_code}: {response.text}")
         except Exception as e:
             logger.error(f"Ollama chat call failed: {e}")
-            return f"[Mock Ollama {self.model}] response to chat history of length {len(messages)}"
+            raise e

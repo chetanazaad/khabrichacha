@@ -5,6 +5,11 @@ class BaseLLMProvider(ABC):
     def __init__(self, config: Dict[str, Any]):
         self.config = config
 
+    @property
+    def model_identifier(self) -> str:
+        """Return the model identifier configured for this provider."""
+        return getattr(self, "model", None) or getattr(self, "model_name", None) or getattr(self, "model_id", None) or ""
+
     @abstractmethod
     def generate(self, prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
         """

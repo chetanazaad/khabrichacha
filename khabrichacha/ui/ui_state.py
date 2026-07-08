@@ -45,3 +45,4 @@ main_loop: Optional[Any] = None
 # Save project button state
 save_project_btn: Optional[ui.button] = None
 current_project_id: Optional[str] = None
+downloads_container: Optional[ui.column] = None

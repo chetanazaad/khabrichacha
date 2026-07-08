@@ -42,6 +42,6 @@ class SummarizeResultsTool(BaseTool):
         return "Final Report: All target pipeline operations finished successfully. Worktrees updated."
 
 def register_builtin_tools(registry):
-    registry.register_tool(WorkspaceInitTool())
-    registry.register_tool(ExecuteTaskTool())
-    registry.register_tool(SummarizeResultsTool())
+    for tool in [WorkspaceInitTool(), ExecuteTaskTool(), SummarizeResultsTool()]:
+        if not registry.has_tool(tool.name):
+            registry.register_tool(tool)

@@ -22,9 +22,12 @@ def handle_event(event):
     msg = f"[{event.component}] {event.message}"
     if ui_state.log_view:
         ui_state.log_view.push(msg)
-    if event.level == "INFO":
-        if event.component == "Controller" and ui_state.progress_label:
-            ui_state.progress_label.set_text(event.message)
+    if ui_state.progress_label:
+        ui_state.progress_label.set_text(event.message)
+    if hasattr(event, "metadata") and isinstance(event.metadata, dict):
+        prog = event.metadata.get("progress")
+        if prog is not None and ui_state.progress_bar:
+            ui_state.progress_bar.set_value(float(prog))
             
 _event_bus.subscribe("INFO", handle_event)
 _event_bus.subscribe("WARNING", handle_event)
@@ -187,13 +190,22 @@ async def run_research(goal: str, model: str, strategy_name: str, sources: int):
         if ui_state.duplicates_removed_indicator:
             ui_state.duplicates_removed_indicator.set_text("Duplicates: 0")
         if ui_state.trust_score_indicator:
-            ui_state.trust_score_indicator.set_text("Avg Trust: 85")
+            avg_trust = result.retrieval_stats.get("avg_trust_score", 85)
+            ui_state.trust_score_indicator.set_text(f"Avg Trust: {avg_trust:.0f}")
         if ui_state.output_format_indicator:
             ui_state.output_format_indicator.set_text(f"Format: {result.output_format or 'Text'}")
         if ui_state.knowledge_cache_indicator:
             ui_state.knowledge_cache_indicator.set_text(f"Cache Hits: {result.statistics.knowledge_cache_hits}")
         if ui_state.consensus_score_indicator:
-            ui_state.consensus_score_indicator.set_text("Consensus: ✔")
+            consensus = result.retrieval_stats.get("consensus_score")
+            if consensus:
+                ui_state.consensus_score_indicator.set_text(f"Consensus: {consensus:.0%}")
+            else:
+                ui_state.consensus_score_indicator.set_text("Consensus: N/A")
+            
+        # Update downloads panel
+        if result.project_id:
+            update_downloads(result.project_id)
             
         ui.notify(f"Research completed in {result.elapsed_time:.1f}s", type="positive")
     else:
@@ -212,6 +224,42 @@ async def run_research(goal: str, model: str, strategy_name: str, sources: int):
         ui_state.progress_label.set_text("Completed")
 
 
+def update_downloads(project_id: str):
+    if ui_state.downloads_container:
+        ui_state.downloads_container.clear()
+        import os
+        from pathlib import Path
+        
+        files_found = []
+        try:
+            # Check temp or projects path
+            if project_id.startswith("temp_session_"):
+                project_dir = _workspace_manager.temp / project_id
+            else:
+                project_dir = _workspace_manager.get_project_path(project_id)
+                
+            for name, label in [("report.pdf", "Download PDF Report"), 
+                                ("report.docx", "Download Word DOCX Report"), 
+                                ("report.md", "Download Markdown Report"),
+                                ("report.json", "Download JSON Metadata")]:
+                fpath = project_dir / name
+                if fpath.exists():
+                    files_found.append((fpath, label))
+        except Exception as e:
+            logger.warning(f"Error finding files in project dir for {project_id}: {e}")
+            
+        if files_found:
+            with ui_state.downloads_container:
+                ui.markdown("### Available Deliverables").classes("text-lg font-bold mb-2 text-slate-200")
+                for fpath, label in files_found:
+                    def make_click(p=fpath):
+                        ui.download(str(p))
+                    ui.button(label, on_click=make_click, icon="file_download").classes("w-full md:w-auto bg-primary text-white")
+        else:
+            with ui_state.downloads_container:
+                ui.markdown("_No deliverables generated for this session yet._").classes("results-panel text-sm")
+
+
 def save_project_clicked():
     if not ui_state.current_project_id:
         ui.notify("No active research session to save.", type="warning")
@@ -225,6 +273,7 @@ def save_project_clicked():
             ui.notify("Project successfully saved!", type="positive")
             if ui_state.save_project_btn:
                 ui_state.save_project_btn.props("disable")
+            update_downloads(ui_state.current_project_id)
         else:
             ui.notify("Project is already saved permanently.", type="info")
     except Exception as e:
@@ -262,6 +311,8 @@ def resume_research():
 
 def stop_research():
     logger.info("Research stopped.")
+    _research_controller.stop()
+    ui.notify("Stopping active research...", type="warning")
 
 
 def load_project(project_id: str):
@@ -285,6 +336,9 @@ def load_project(project_id: str):
         if ui_state.references_markdown and refs.entries:
             lines = [f"- [{r.title}]({r.url})" for r in refs.entries if r.url]
             ui_state.references_markdown.set_content("\n".join(lines) if lines else "_No references._")
+
+        # Update downloads
+        update_downloads(project_id)
 
         # Update status bar
         if ui_state.project_label:
