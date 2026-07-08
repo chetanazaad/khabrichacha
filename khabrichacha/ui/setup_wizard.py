@@ -123,7 +123,7 @@ def setup_page():
                         
                         loop = asyncio.get_running_loop()
                         def run_pip():
-                            cmd = f"{sys.executable} -m pip install {pkg_to_install} -q"
+                            cmd = f'"{sys.executable}" -m pip install {pkg_to_install} -q'
                             res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
                             return res.returncode == 0
                         
