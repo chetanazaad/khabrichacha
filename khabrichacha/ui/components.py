@@ -174,9 +174,7 @@ def _build_chat_workspace():
             with ui.row().classes("w-full items-center gap-2 justify-between border-b border-gray-800/80 pb-1.5 px-1"):
                 with ui.row().classes("items-center gap-2"):
                     ui_state.strategy_select = ui.select(
-                        options=["Auto (Recommended)", "Fast Answer", "Lookup",
-                                 "Structured Data", "Comparison", "Analysis",
-                                 "Research", "Deep Research"],
+                        options=["Auto (Recommended)", "Deep Research"],
                         value="Auto (Recommended)",
                     ).props("dense options-dense borderless").classes("bg-gray-800 text-xs text-indigo-300 rounded px-2 py-0.5 border border-indigo-500/30")
 

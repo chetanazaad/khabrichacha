@@ -17,9 +17,10 @@ class WorkspaceIndex:
         Returns a list of matching context dictionaries.
         """
         matches = []
-        query_terms = [term.lower() for term in query.split() if len(term) > 2]
+        STOP_WORDS = {"what", "is", "the", "of", "and", "a", "an", "in", "to", "for", "on", "with", "as", "by", "at", "from", "who", "where", "how", "why"}
+        query_terms = [term.lower() for term in query.split() if len(term) > 2 and term.lower() not in STOP_WORDS]
         if not query_terms:
-            query_terms = [query.lower()]
+            return matches
 
         try:
             projects = self.pm.list_projects()
@@ -28,8 +29,9 @@ class WorkspaceIndex:
                 title = proj.title.lower()
                 mission = proj.mission.lower()
                 
-                # Check if query overlaps with title or mission
-                title_match = any(term in title or term in mission for term in query_terms)
+                # Check if non-stopword query terms overlap significantly with title or mission
+                title_matches = sum(1 for term in query_terms if term in title or term in mission)
+                title_match = (title_matches == len(query_terms)) if query_terms else False
                 
                 findings = []
                 try:
@@ -52,8 +54,8 @@ class WorkspaceIndex:
                 content_to_search = " ".join(findings).lower() + " " + report_content.lower()
                 content_match_count = sum(content_to_search.count(term) for term in query_terms)
                 
-                if title_match or content_match_count > 0:
-                    score = (50 if title_match else 0) + min(content_match_count * 10, 50)
+                if title_match or (len(query_terms) > 0 and content_match_count >= len(query_terms) * 3):
+                    score = (60 if title_match else 0) + min(content_match_count * 5, 40)
                     matches.append({
                         "project_id": pid,
                         "title": proj.title,

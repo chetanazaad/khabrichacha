@@ -17,14 +17,21 @@ _provider_manager = ProviderManager(_config.model_dump())
 _event_bus = EventBus()
 _research_controller = ResearchController(_workspace_manager, _provider_manager, _event_bus)
 
-# Hook up event bus to UI
+# Hook up event bus to UI safely
 def handle_event(event):
     msg = f"[{event.component}] {event.message}"
     if ui_state.log_view:
-        ui_state.log_view.push(msg)
+        try:
+            ui_state.log_view.push(msg)
+        except Exception:
+            ui_state.log_view = None
+            
     if event.level == "INFO":
         if event.component == "Controller" and ui_state.progress_label:
-            ui_state.progress_label.set_text(event.message)
+            try:
+                ui_state.progress_label.set_text(event.message)
+            except Exception:
+                ui_state.progress_label = None
             
 _event_bus.subscribe("INFO", handle_event)
 _event_bus.subscribe("WARNING", handle_event)
@@ -32,12 +39,6 @@ _event_bus.subscribe("ERROR", handle_event)
 
 _STRATEGY_MAP = {
     "Auto (Recommended)": None,
-    "Fast Answer": "FAST",
-    "Lookup": "LOOKUP",
-    "Structured Data": "STRUCTURED",
-    "Comparison": "COMPARISON",
-    "Analysis": "ANALYSIS",
-    "Research": "RESEARCH",
     "Deep Research": "DEEP_RESEARCH",
 }
 

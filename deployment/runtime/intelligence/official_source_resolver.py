@@ -14,12 +14,13 @@ class OfficialSourceResolver:
         self.official_keywords = [
             "regulation", "law", "act", "policy", "guideline", "official",
             "government", "statistics", "census", "tax", "sebi", "rbi",
-            "fda", "who", "ministry", "department", "scheme", "compliance"
+            "fda", "who", "ministry", "department", "scheme", "compliance",
+            "export", "exports", "import", "imports", "trade", "gdp"
         ]
 
         # Common official domains to enforce
         self.official_domains = [
-            "gov", "nic.in", "gov.in", "who.int", "rbi.org.in", "sebi.gov.in"
+            "gov", "nic.in", "gov.in", "who.int", "rbi.org.in", "sebi.gov.in", "pib.gov.in"
         ]
 
     def needs_official_sources(self, query: str) -> bool:

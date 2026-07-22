@@ -204,32 +204,38 @@ class Planner:
             goal_lower = goal.lower()
             gov_keywords = {"government", "budget", "policy", "gov"}
             acad_keywords = {"research", "study", "paper"}
+            stat_keywords = {"export", "import", "trade", "statistic", "data", "gdp", "table", "year by year", "figure"}
+            news_keywords = {"news", "headline", "breaking", "latest news"}
             
             is_gov = any(kw in goal_lower for kw in gov_keywords)
             is_acad = any(kw in goal_lower for kw in acad_keywords)
+            is_stat = any(kw in goal_lower for kw in stat_keywords)
+            is_explicit_news = any(kw in goal_lower for kw in news_keywords)
             
-            query_modifiers = {
-                1: "",
-                2: "news updates recent",
-                3: "detailed analysis",
-                4: "challenges future outlook",
-                5: "case study summary"
-            }
-            modifier = query_modifiers.get(iteration, "developments")
-            query = f"{goal} {modifier}".strip()
+            # Keep original goal intact to prevent query drift
+            query = goal.strip()
             
-            if is_gov and "search_web" in available_tools:
-                steps.append(PlanStep(id="1", description=f"Search government sites for {modifier}", tool_name="search_web", args={"query": f"{query} site:gov"}, depends_on=[]))
+            if is_stat and "search_web" in available_tools:
+                # Target official / statistical trade data web search
+                steps.append(PlanStep(id="1", description="Search web for statistical data", tool_name="search_web", args={"query": query}, depends_on=[]))
                 if "fetch_page" in available_tools:
-                    steps.append(PlanStep(id="2", description="Fetch results", tool_name="fetch_page", args={"url": "${step1[*].url}"}, depends_on=["1"]))
+                    steps.append(PlanStep(id="2", description="Fetch statistical source pages", tool_name="fetch_page", args={"url": "${step1[*].url}"}, depends_on=["1"]))
+            elif is_gov and "search_web" in available_tools:
+                steps.append(PlanStep(id="1", description="Search government sites", tool_name="search_web", args={"query": f"{query} site:gov OR site:gov.in"}, depends_on=[]))
+                if "fetch_page" in available_tools:
+                    steps.append(PlanStep(id="2", description="Fetch government portal results", tool_name="fetch_page", args={"url": "${step1[*].url}"}, depends_on=["1"]))
             elif is_acad and "search_web" in available_tools:
-                steps.append(PlanStep(id="1", description=f"Search academic sites for {modifier}", tool_name="search_web", args={"query": f"{query} site:edu OR site:org"}, depends_on=[]))
+                steps.append(PlanStep(id="1", description="Search academic & institutional sites", tool_name="search_web", args={"query": f"{query} site:edu OR site:org"}, depends_on=[]))
                 if "fetch_page" in available_tools:
-                    steps.append(PlanStep(id="2", description="Fetch results", tool_name="fetch_page", args={"url": "${step1[*].url}"}, depends_on=["1"]))
-            elif "search_news" in available_tools:
-                steps.append(PlanStep(id="1", description=f"Search broader news for {modifier}", tool_name="search_news", args={"query": query}, depends_on=[]))
+                    steps.append(PlanStep(id="2", description="Fetch institutional results", tool_name="fetch_page", args={"url": "${step1[*].url}"}, depends_on=["1"]))
+            elif is_explicit_news and "search_news" in available_tools:
+                steps.append(PlanStep(id="1", description="Search news articles", tool_name="search_news", args={"query": query}, depends_on=[]))
                 if "fetch_page" in available_tools:
-                    steps.append(PlanStep(id="2", description="Fetch results", tool_name="fetch_page", args={"url": "${step1[*].url}"}, depends_on=["1"]))
+                    steps.append(PlanStep(id="2", description="Fetch news page results", tool_name="fetch_page", args={"url": "${step1[*].url}"}, depends_on=["1"]))
+            elif "search_web" in available_tools:
+                steps.append(PlanStep(id="1", description="Search web for exact query", tool_name="search_web", args={"query": query}, depends_on=[]))
+                if "fetch_page" in available_tools:
+                    steps.append(PlanStep(id="2", description="Fetch search results", tool_name="fetch_page", args={"url": "${step1[*].url}"}, depends_on=["1"]))
             else:
                 continue_research = False
                 reason = "Cannot generate fallback steps."

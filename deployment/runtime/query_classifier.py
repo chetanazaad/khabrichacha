@@ -109,11 +109,11 @@ class QueryClassifier:
         if math_pattern and re.match(math_pattern, cleaned_mission):
             return self._build_strategy("FAST", mission, confidence=0.99, intent="MATHEMATICS")
 
-        # Fact prefixes
+        # Fact prefixes (Real world / entity / current state questions need LOOKUP web search)
         fact_prefixes = classification_rules.get("fast_patterns", {}).get("fact_prefixes", [])
         for prefix in fact_prefixes:
             if cleaned_mission.startswith(prefix.lower()):
-                return self._build_strategy("FAST", mission, confidence=0.95, intent="FACT_LOOKUP", complexity=complexity_score)
+                return self._build_strategy("LOOKUP", mission, confidence=0.95, intent="FACT_LOOKUP", complexity=complexity_score)
 
         # Programming syntax
         programming_keywords = classification_rules.get("fast_patterns", {}).get("programming", [])
