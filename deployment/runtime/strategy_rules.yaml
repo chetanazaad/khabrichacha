@@ -1,0 +1,278 @@
+strategies:
+  FAST:
+    complexity: 0
+    requires_planner: false
+    requires_llm: true
+    requires_search: false
+    requires_fetch: false
+    requires_adaptive_loop: false
+    requires_evidence_evaluation: false
+    requires_report_generation: false
+    allow_project_creation: false
+    allow_workspace_save: false
+    preferred_output: "direct_answer"
+    max_iterations: 0
+    enabled_tools: []
+    estimated_latency_seconds: 2
+    estimated_cost: "free"
+    budget:
+      max_searches: 0
+      max_fetches: 0
+      max_llm_calls: 1
+      max_iterations: 0
+      max_runtime_seconds: 5
+
+  LOOKUP:
+    complexity: 1
+    requires_planner: false
+    requires_llm: false
+    requires_search: true
+    requires_fetch: false
+    requires_adaptive_loop: false
+    requires_evidence_evaluation: false
+    requires_report_generation: false
+    allow_project_creation: false
+    allow_workspace_save: false
+    preferred_output: "direct_answer"
+    max_iterations: 1
+    enabled_tools: ["search_web", "search_news"]
+    estimated_latency_seconds: 5
+    estimated_cost: "low"
+    budget:
+      max_searches: 3
+      max_fetches: 0
+      max_llm_calls: 0
+      max_iterations: 1
+      max_runtime_seconds: 10
+
+  STRUCTURED:
+    complexity: 2
+    requires_planner: false
+    requires_llm: false
+    requires_search: true
+    requires_fetch: true
+    requires_adaptive_loop: false
+    requires_evidence_evaluation: false
+    requires_report_generation: false
+    allow_project_creation: true
+    allow_workspace_save: true
+    preferred_output: "markdown_table"
+    max_iterations: 1
+    enabled_tools: ["search_web", "fetch_page"]
+    estimated_latency_seconds: 8
+    estimated_cost: "low"
+    budget:
+      max_searches: 3
+      max_fetches: 5
+      max_llm_calls: 1
+      max_iterations: 1
+      max_runtime_seconds: 20
+
+  COMPARISON:
+    complexity: 3
+    requires_planner: false
+    requires_llm: true
+    requires_search: true
+    requires_fetch: true
+    requires_adaptive_loop: false
+    requires_evidence_evaluation: false
+    requires_report_generation: false
+    allow_project_creation: true
+    allow_workspace_save: true
+    preferred_output: "comparison_matrix"
+    max_iterations: 1
+    enabled_tools: ["search_web", "fetch_page"]
+    estimated_latency_seconds: 10
+    estimated_cost: "medium"
+    budget:
+      max_searches: 6
+      max_fetches: 6
+      max_llm_calls: 2
+      max_iterations: 1
+      max_runtime_seconds: 30
+
+  ANALYSIS:
+    complexity: 3
+    requires_planner: false
+    requires_llm: true
+    requires_search: true
+    requires_fetch: true
+    requires_reasoning: true
+    requires_adaptive_loop: false
+    requires_evidence_evaluation: false
+    requires_report_generation: false
+    allow_project_creation: true
+    allow_workspace_save: true
+    allow_reasoning: true
+    allow_analysis: true
+    preferred_output: "direct_answer"
+    max_iterations: 1
+    enabled_tools: ["search_web", "search_news", "fetch_page"]
+    estimated_latency_seconds: 15
+    estimated_cost: "medium"
+    budget:
+      max_searches: 5
+      max_fetches: 5
+      max_llm_calls: 2
+      max_iterations: 1
+      max_runtime_seconds: 45
+
+  RESEARCH:
+    complexity: 4
+    requires_planner: true
+    requires_llm: true
+    requires_search: true
+    requires_fetch: true
+    requires_reasoning: true
+    requires_adaptive_loop: false
+    requires_evidence_evaluation: true
+    requires_report_generation: true
+    allow_project_creation: true
+    allow_workspace_save: true
+    allow_report_generation: true
+    allow_evidence_collection: true
+    allow_summary_generation: true
+    allow_reasoning: true
+    allow_analysis: true
+    preferred_output: "report_md"
+    max_iterations: 3
+    enabled_tools: ["search_web", "search_news", "fetch_page", "fetch_pdf", "python_executor", "generate_report"]
+    estimated_latency_seconds: 120
+    estimated_cost: "medium"
+    budget:
+      max_searches: 10
+      max_fetches: 10
+      max_llm_calls: 5
+      max_iterations: 3
+      max_runtime_seconds: 300
+
+  DEEP_RESEARCH:
+    complexity: 5
+    requires_planner: true
+    requires_llm: true
+    requires_search: true
+    requires_fetch: true
+    requires_reasoning: true
+    requires_adaptive_loop: true
+    requires_evidence_evaluation: true
+    requires_report_generation: true
+    allow_project_creation: true
+    allow_workspace_save: true
+    allow_report_generation: true
+    allow_evidence_collection: true
+    allow_summary_generation: true
+    allow_reasoning: true
+    allow_analysis: true
+    preferred_output: "report_md"
+    max_iterations: 5
+    enabled_tools: ["search_web", "search_news", "fetch_page", "fetch_pdf", "python_executor", "generate_report"]
+    estimated_latency_seconds: 300
+    estimated_cost: "high"
+    budget:
+      max_searches: 20
+      max_fetches: 15
+      max_llm_calls: 10
+      max_iterations: 5
+      max_runtime_seconds: 900
+
+# Keyword patterns for heuristic classification
+classification:
+  fast_patterns:
+    math: "^[\\d\\s\\+\\-\\*\\/\\.\\(\\)]+$"
+    fact_prefixes:
+      - "capital of"
+      - "who is the president"
+      - "who is the prime minister"
+      - "what is the formula"
+      - "define "
+      - "meaning of "
+      - "what does .* mean"
+    programming:
+      - "python syntax"
+      - "how to print in"
+      - "javascript function"
+      - "http status code"
+      - "html tag for"
+
+  lookup_keywords:
+    - "latest"
+    - "current"
+    - "today"
+    - "price of"
+    - "weather in"
+    - "score of"
+    - "ceo of"
+
+  structured_keywords:
+    - "budget"
+    - "gdp"
+    - "population"
+    - "election results"
+    - "financial statement"
+    - "financials"
+    - "statistics"
+    - "data"
+    - "table"
+    - "figures"
+    - "annual report"
+    - "total number of"
+    - "total "
+    - "how many"
+    - "how much"
+    - "cumulative"
+    - "worldwide"
+    - "global total"
+    - "to date"
+    - "since 19"
+    - "since 20"
+    - "count of"
+    - "number of deaths"
+    - "number of accidents"
+    - "death toll"
+    - "casualties"
+
+  comparison_patterns:
+    - " vs "
+    - " versus "
+    - "compare"
+    - "comparison"
+    - "difference between"
+    - "better than"
+
+  analysis_keywords:
+    - "explain"
+    - "why did"
+    - "why is"
+    - "why has"
+    - "how does"
+    - "impact of"
+    - "effect of"
+    - "reason for"
+    - "cause of"
+
+  research_keywords:
+    - "analyze"
+    - "research"
+    - "history of"
+    - "evaluate"
+    - "assess"
+    - "examine"
+    - "review"
+    - "study"
+
+  deep_research_keywords:
+    - "investigate"
+    - "deep dive"
+    - "comprehensive analysis"
+    - "root cause"
+    - "behind the news"
+    - "corporate investigation"
+    - "geopolitical analysis"
+
+  escalation_thresholds:
+    fast_to_lookup: 0.90
+    lookup_to_structured: 0.80
+    structured_to_comparison: 0.60
+    comparison_to_analysis: 0.70
+    analysis_to_research: 0.60
+    research_to_deep: 0.65

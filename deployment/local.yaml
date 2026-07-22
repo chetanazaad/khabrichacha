@@ -1,0 +1,14 @@
+# ============================================================
+# KhabriChacha — Local Development Override
+# ============================================================
+
+workspace:
+  root: "./workspace"
+
+server:
+  host: "127.0.0.1"
+  port: 8080
+
+logging:
+  level: "DEBUG"
+  file: true

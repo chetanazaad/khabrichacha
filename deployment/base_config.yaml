@@ -1,0 +1,67 @@
+# ============================================================
+# KhabriChacha — Base Configuration
+# All environment overrides merge on top of this file.
+# ============================================================
+
+app:
+  name: "KhabriChacha"
+  version: "1.0.0"
+  schema_version: "1.0"
+
+# --- Workspace ---
+workspace:
+  root: "./workspace"           # overridden per environment
+
+# --- Server ---
+server:
+  host: "127.0.0.1"
+  port: 8080
+  reload: false
+  dark: true
+
+# --- LLM Defaults ---
+llm:
+  # Free, local-first default: Ollama needs no API key. Run
+  # `ollama pull qwen2.5:3b` once, and the app will auto-detect it.
+  default_provider: "ollama"
+  temperature: 0.7
+  max_tokens: 2048
+  system_prompt: >-
+    You are Khabri Chacha, an intelligent, helpful agent assistant.
+    Act as a coordinator and solve user queries step by step.
+
+# --- Semantic relevance (optional) ---
+# Augments the lexical relevance filter with real embedding-based
+# similarity, so genuinely relevant sources that are worded differently
+# from the mission (paraphrases, synonyms) aren't missed. This is purely
+# informational -- khabrichacha/core/embeddings.py auto-discovers a
+# backend at runtime (Ollama embedding model -> OpenAI -> Gemini) with no
+# configuration needed here. To enable the free/local path:
+#   ollama pull nomic-embed-text
+# If no backend is reachable, relevance filtering silently falls back to
+# lexical-only scoring -- nothing breaks either way.
+
+# --- Research Defaults ---
+research:
+  depth: "standard"
+  max_iterations: 5
+  max_runtime_minutes: 15
+  max_sources: 10
+  parallel_fetch: 10
+  language: "English"
+  output_formats:
+    - "md"
+    - "json"
+    - "pdf"
+    - "docx"
+
+# --- Browser ---
+browser:
+  playwright: true
+  chromium: true
+  timeout: 30
+
+# --- Logging ---
+logging:
+  level: "INFO"
+  file: true

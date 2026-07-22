@@ -1,0 +1,29 @@
+application:
+  name: KhabriChacha
+  version: 0.1
+
+storage:
+  project_directory: ./projects
+
+logging:
+  directory: ./logs
+
+search:
+  searxng_url: https://searx.be
+
+llm:
+  provider: none
+  model: none
+  ingestion_provider: none
+  ingestion_model: none
+  analysis_provider: none
+  analysis_model: none
+
+research:
+  depth: standard
+  max_sources: 25
+
+ui:
+  theme: dark
+
+
