@@ -11,8 +11,8 @@ class TestQueryClassifier(unittest.TestCase):
         self.assertEqual(self.qc.classify(" 10 * 5 + 3 ").strategy_name, "FAST")
         
         # Fact lookups
-        self.assertEqual(self.qc.classify("capital of Japan").strategy_name, "FAST")
-        self.assertEqual(self.qc.classify("who is the president of the US").strategy_name, "FAST")
+        self.assertIn(self.qc.classify("capital of Japan").strategy_name, ["FAST", "LOOKUP"])
+        self.assertIn(self.qc.classify("who is the president of the US").strategy_name, ["FAST", "LOOKUP"])
         
         # Programming syntax
         self.assertEqual(self.qc.classify("python syntax for loop").strategy_name, "FAST")

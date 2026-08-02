@@ -54,11 +54,40 @@ _DOWNLOAD_FORMATS = [
 
 def navigate_to_page(page_name: str):
     ui_state.current_page = page_name.lower()
-    from khabrichacha.ui.pages import render_page
-    if ui_state.results_markdown:
-        ui_state.results_markdown.set_content("")
-    ui.notify(f"Opened {page_name} view", type="info")
-    render_page(ui_state.current_page)
+    ui.notify(f"Switched to {page_name} view", type="info")
+    from khabrichacha.ui.components import render_workspace_view, _render_sidebar_content
+    render_workspace_view()
+    _render_sidebar_content.refresh()
+
+
+def toggle_sidebar():
+    ui_state.sidebar_visible = not ui_state.sidebar_visible
+    if ui_state.sidebar_container:
+        if ui_state.sidebar_visible:
+            ui_state.sidebar_container.classes(remove="collapsed")
+        else:
+            ui_state.sidebar_container.classes(add="collapsed")
+
+
+def start_new_chat():
+    ui_state.current_page = "research"
+    ui_state.current_project_id = None
+    if ui_state.project_label:
+        ui_state.project_label.set_text("New Chat")
+    if ui_state.save_project_btn:
+        ui_state.save_project_btn.props("disable")
+
+    from khabrichacha.ui.components import render_workspace_view, _render_sidebar_content
+    render_workspace_view()
+    _render_sidebar_content.refresh()
+    _populate_downloads(None)
+    ui.notify("Started new research session", type="positive")
+
+
+def refresh_saved_projects_sidebar():
+    from khabrichacha.ui.components import _render_sidebar_content
+    _render_sidebar_content.refresh()
+
 
 
 def _populate_downloads(project_path: "str | None" = None, result=None):
@@ -200,6 +229,7 @@ async def run_research(goal: str, router_model_opt: str, analysis_model_opt: str
 
         ui_state.current_project_id = result.project_id
         _populate_downloads(result.project_path, result)
+        refresh_saved_projects_sidebar()
 
         if result.project_id and result.project_id.startswith("temp_session_"):
             if ui_state.save_project_btn:
@@ -295,6 +325,7 @@ def save_project_clicked():
             ui.notify("Project successfully saved!", type="positive")
             if ui_state.save_project_btn:
                 ui_state.save_project_btn.props("disable")
+            refresh_saved_projects_sidebar()
         else:
             ui.notify("Project is already saved permanently.", type="info")
     except Exception as e:
@@ -306,7 +337,6 @@ def pause_research():
     logger.info("Research paused.")
 
 
-
 def resume_research():
     logger.info("Research resumed.")
 
@@ -316,37 +346,57 @@ def stop_research():
 
 
 def load_project(project_id: str):
-    """Load a saved project's report and references into the UI."""
-    logger.info(f"Loading project: {project_id}")
+    """Load a saved project's report and prompt directly into the Chat UI thread."""
+    logger.info(f"Loading project into Chat UI: {project_id}")
     try:
+        ui_state.current_page = "research"
+        ui_state.current_project_id = project_id
+
+        from khabrichacha.ui.components import render_workspace_view
+        render_workspace_view()
+
         manifest = _workspace_manager.get_project(project_id).manifest
         pm = _workspace_manager.get_project(project_id)
 
-        # Load report markdown
         import os
         report_path = os.path.join(pm.project_path, "report.md")
+        md_content = ""
         if os.path.exists(report_path):
             with open(report_path, "r", encoding="utf-8") as f:
                 md_content = f.read()
-            if ui_state.results_markdown and md_content.strip():
-                ui_state.results_markdown.set_content(md_content)
 
-        # Load references
-        refs = pm.load_references()
-        if ui_state.references_markdown and refs.entries:
-            lines = [f"- [{r.title}]({r.url})" for r in refs.entries if r.url]
-            ui_state.references_markdown.set_content("\n".join(lines) if lines else "_No references._")
+        # Update Chat Thread Container with User & Assistant Bubbles
+        if ui_state.chat_container:
+            ui_state.chat_container.clear()
+            with ui_state.chat_container:
+                # User Prompt Bubble
+                prompt_title = manifest.title or project_id
+                with ui.row().classes("w-full gap-3 items-start justify-end my-2"):
+                    with ui.column().classes("bg-indigo-600/30 text-indigo-100 rounded-2xl px-4 py-3 max-w-2xl border border-indigo-500/30 shadow-lg"):
+                        ui.label(prompt_title).classes("text-sm font-medium whitespace-pre-wrap")
+                    ui.label("👤").classes("text-xl")
 
-        # Update status bar
+                # Assistant Report Bubble
+                with ui.row().classes("w-full gap-3 items-start my-2"):
+                    ui.label("🤖").classes("text-xl")
+                    with ui.column().classes("bg-gray-900/90 rounded-2xl p-4 flex-1 border border-gray-700/80 shadow-lg gap-2"):
+                        with ui.row().classes("items-center gap-2 text-xs text-indigo-400 font-mono border-b border-gray-800 pb-2 w-full justify-between"):
+                            ui.label(f"Project: {project_id[:16]}").classes("font-semibold")
+                            ui.label(f"Created: {manifest.created_at or ''}").classes("text-gray-400 text-[10px]")
+                        if md_content.strip():
+                            ui.markdown(md_content).classes("text-sm text-gray-200")
+                        else:
+                            ui.markdown("_No report markdown file found for this session._").classes("text-sm text-gray-400 italic")
+
+        # Update Header Title
         if ui_state.project_label:
             ui_state.project_label.set_text(manifest.title or project_id)
-        if ui_state.model_label:
-            ui_state.model_label.set_text(f"{manifest.provider}/{manifest.model}" if manifest.provider else "N/A")
 
-        # Populate the Downloads tab for this saved project too
+        # Populate Downloads Panel for this project
         _populate_downloads(pm.project_path)
 
-        ui.notify(f"Loaded project: {manifest.title}", type="info")
+        ui.notify(f"Loaded project: {manifest.title or project_id}", type="info")
     except Exception as e:
         logger.error(f"Failed to load project {project_id}: {e}")
         ui.notify(f"Failed to load project: {e}", type="negative")
+

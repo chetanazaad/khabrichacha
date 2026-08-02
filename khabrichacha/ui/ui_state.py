@@ -62,3 +62,10 @@ chat_messages: list = []
 # Current UI page selection for the left navigation.
 current_page: str = "research"
 
+# Collapsible sidebar and workspace state
+sidebar_visible: bool = True
+sidebar_container: Optional[Any] = None
+saved_projects_container: Optional[Any] = None
+main_workspace_container: Optional[Any] = None
+
+

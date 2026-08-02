@@ -9,6 +9,14 @@ from khabrichacha.ui.callbacks import (
     load_project,
     save_project_clicked,
     navigate_to_page,
+    toggle_sidebar,
+    start_new_chat,
+)
+from khabrichacha.ui.pages import (
+    render_projects_view,
+    render_models_view,
+    render_settings_view,
+    render_logs_view,
 )
 
 
@@ -17,8 +25,34 @@ def build_layout():
         _build_status_bar()
         with ui.row().classes("w-full flex-1 gap-3 min-h-0 overflow-hidden"):
             _build_left_nav()
-            _build_chat_workspace()
+            
+            # Central Workspace Dynamic Container
+            ui_state.main_workspace_container = ui.column().classes("flex-1 panel gap-0 h-full overflow-hidden relative p-0 transition-all duration-300")
+            with ui_state.main_workspace_container:
+                render_workspace_view()
+
             _build_right_panel()
+
+
+def render_workspace_view():
+    """Dynamically clear and render central workspace depending on current_page."""
+    if not ui_state.main_workspace_container:
+        return
+
+    ui_state.main_workspace_container.clear()
+    with ui_state.main_workspace_container:
+        page = ui_state.current_page.lower()
+        if page == "projects":
+            render_projects_view(on_load_project=load_project)
+        elif page == "models":
+            render_models_view()
+        elif page == "settings":
+            render_settings_view()
+        elif page == "logs":
+            render_logs_view()
+        else:
+            # Default: Research Chat workspace
+            _build_chat_workspace()
 
 
 def _get_project_list():
@@ -64,9 +98,11 @@ def _build_status_bar():
             default_analysis = m
             break
 
-    with ui.row().classes("w-full status-bar items-center justify-between px-4 py-2 gap-2 flex-shrink-0"):
+    with ui.row().classes("w-full status-bar items-center justify-between px-3 py-1.5 gap-2 flex-shrink-0"):
         with ui.row().classes("items-center gap-2"):
-            ui.label("KhabriChacha AI").classes("text-lg font-bold text-white tracking-wide")
+            # Collapsible Sidebar Toggle Button
+            ui.button(icon="menu", on_click=toggle_sidebar).props("flat dense color=indigo-4").classes("p-1")
+            ui.label("KhabriChacha AI").classes("text-base font-bold text-white tracking-wide")
             ui.label("Dual-LLM Engine").classes("text-[10px] bg-indigo-900/60 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-full font-mono")
 
         with ui.row().classes("items-center gap-4 flex-wrap"):
@@ -87,39 +123,57 @@ def _build_status_bar():
         with ui.row().classes("items-center gap-3 ml-auto"):
             with ui.row().classes("items-center gap-1.5"):
                 ui.label("Project:").classes("text-xs text-gray-400")
-                ui_state.project_label = ui.label("Chat Session").classes("text-xs font-semibold text-indigo-300")
+                ui_state.project_label = ui.label("New Chat").classes("text-xs font-semibold text-indigo-300")
             ui_state.status_label = ui.label("Ready").classes("status-badge status-ready")
 
 
 def _build_left_nav():
-    with ui.column().classes("w-[220px] flex-shrink-0 panel gap-1 h-full overflow-hidden"):
-        ui.html('<div class="section-title">Workspace</div>')
+    ui_state.sidebar_container = ui.column().classes(
+        "w-[260px] flex-shrink-0 panel gap-2 h-full overflow-hidden sidebar-panel transition-all duration-300" + (" collapsed" if not ui_state.sidebar_visible else "")
+    )
+    with ui_state.sidebar_container:
+        _render_sidebar_content()
 
-        for label, icon, active in [
-            ("Research Chat", "", True),
-            ("Projects", "", False),
-            ("Models", "", False),
-            ("Settings", "", False),
-            ("Logs", "", False),
-        ]:
-            btn = ui.button(f"{icon} {label}", on_click=lambda l=label: navigate_to_page(l))
-            btn.classes("nav-btn" + (" active" if active else ""))
 
-        ui.html('<hr class="border-gray-700/60 my-2">')
-        ui.html('<div class="text-[10px] text-gray-400 font-semibold px-2 mb-1 uppercase tracking-wider">Saved Projects</div>')
-        with ui.column().classes("w-full gap-1 overflow-y-auto max-h-48"):
-            projects = _get_project_list()
-            if projects:
-                for proj in projects:
-                    display = proj.title or proj.project_id
-                    pbtn = ui.button(display[:22], on_click=lambda pid=proj.project_id: load_project(pid))
-                    pbtn.classes("nav-btn text-xs pl-2 text-left truncate")
-            else:
-                ui.label("No saved projects yet").classes("text-xs text-gray-500 px-2")
+@ui.refreshable
+def _render_sidebar_content():
+    # "+ New Chat" Button
+    ui.button("+ New Chat", icon="add", on_click=start_new_chat).props("flat").classes("new-chat-btn w-full")
 
-        ui.html('<hr class="border-gray-700/60 my-2">')
-        ui.html('<div class="text-[10px] text-gray-400 font-semibold px-2 mb-1 uppercase tracking-wider">Providers</div>')
-        _build_system_status()
+    ui.html('<div class="section-title text-[10px] text-gray-400 font-semibold px-1 uppercase tracking-wider mt-2">Workspace</div>')
+
+    # Navigation Links with active highlighting
+    for page_id, label, icon in [
+        ("research", "Research Chat", "chat"),
+        ("projects", "Projects", "folder"),
+        ("models", "Models", "memory"),
+        ("settings", "Settings", "settings"),
+        ("logs", "Logs", "terminal"),
+    ]:
+        is_active = (ui_state.current_page.lower() == page_id)
+        btn = ui.button(f"{label}", icon=icon, on_click=lambda l=page_id: navigate_to_page(l)).props("flat")
+        btn.classes("nav-btn" + (" active" if is_active else ""))
+
+    ui.html('<hr class="border-gray-800 my-2">')
+    ui.html('<div class="text-[10px] text-gray-400 font-semibold px-1 uppercase tracking-wider">Saved Projects & History</div>')
+
+    # Dynamic Saved Projects Container
+    ui_state.saved_projects_container = ui.column().classes("w-full gap-1 overflow-y-auto max-h-52 pr-1")
+    with ui_state.saved_projects_container:
+        projects = _get_project_list()
+        if projects:
+            for proj in projects:
+                display = proj.title or proj.project_id
+                ui.button(
+                    display[:26],
+                    on_click=lambda pid=proj.project_id: load_project(pid)
+                ).props("flat").classes("history-btn truncate text-left")
+        else:
+            ui.label("No saved projects yet").classes("text-xs text-gray-500 px-2")
+
+    ui.html('<hr class="border-gray-800 my-2">')
+    ui.html('<div class="text-[10px] text-gray-400 font-semibold px-1 uppercase tracking-wider">Providers</div>')
+    _build_system_status()
 
 
 def _build_system_status():
@@ -151,10 +205,7 @@ def _build_system_status():
 
 
 def _build_chat_workspace():
-    if ui_state.current_page != "research":
-        return
-
-    with ui.column().classes("flex-1 panel gap-3 h-full flex flex-col justify-between overflow-hidden p-4 relative"):
+    with ui.column().classes("w-full h-full flex flex-col justify-between overflow-hidden p-4 relative"):
         # Central Chat Thread (Scrollable Area)
         with ui.scroll_area().classes("w-full flex-1 px-2 overflow-y-auto border-0") as chat_scroll:
             ui_state.chat_container = ui.column().classes("w-full gap-4 max-w-3xl mx-auto py-2")
@@ -199,11 +250,8 @@ def _build_chat_workspace():
                 ).classes("control-btn px-5 py-2 text-sm font-semibold rounded-xl shadow-lg")
 
 
-
 def _build_right_panel():
-    if ui_state.current_page != "research":
-        return
-    with ui.column().classes("w-[280px] flex-shrink-0 gap-3 h-full overflow-hidden"):
+    with ui.column().classes("w-[260px] flex-shrink-0 gap-3 h-full overflow-hidden"):
         _build_tabbed_workspace()
 
 
@@ -246,5 +294,6 @@ def _build_tabbed_workspace():
 
             with ui.tab_panel(tab_logs):
                 ui_state.log_view = ui.log().classes("w-full log-view h-80")
+
 
 
