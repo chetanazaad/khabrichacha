@@ -1,84 +1,71 @@
-# Khabri Chacha
+# Khabri Chacha AI
 
-An agentic AI research framework: point it at a question, and it searches
-the web, browses pages (rendering JavaScript when needed), reconciles facts
-across sources, and hands back a sourced answer as Markdown, JSON, PDF, or
-Word — with a UI to enter the request and watch progress in real time.
-Built to run entirely for free: no LLM API key required if you use a local
-model via Ollama (e.g. `qwen2.5:3b`).
+An agentic AI research framework: point it at a question, and it classifies the intent, dynamically builds a search plan, browses pages (rendering JavaScript when needed), extracts consensus facts, and outputs synthesized reports as Markdown, JSON, PDF, or Word documents.
 
-## Project Structure
-- `app.py`: Launcher script (NiceGUI).
-- `khabrichacha/core/`: Simpler orchestrator + planner engine, reused by the
-  RESEARCH/DEEP_RESEARCH strategies below.
-- `khabrichacha/llm/`: Unified LLM adapter interface supporting OpenAI,
-  OpenRouter, Gemini, Ollama, and local Hugging Face Transformers models.
-- `khabrichacha/tools/`: Extensible tools registry and built-in action
-  runners (web search, page fetch/browse, PDF fetch, Python execution).
-- `khabrichacha/ui/`: Pages, components, callbacks, and theming — built on
-  **NiceGUI**, not Streamlit.
-- `deployment/runtime/`: The main research engine — classifies each query
-  into a strategy (FAST / LOOKUP / STRUCTURED / COMPARISON / ANALYSIS /
-  RESEARCH / DEEP_RESEARCH) and runs a purpose-built pipeline for it,
-  including cross-source numeric consensus and trust-ranked retrieval.
-- `deployment/workspace/`: On-disk project storage, caching, and asset
-  management.
-- `deployment/reporting/`: Turns a finished run into report.md / .json /
-  .pdf / .docx.
+This application features a modern **Perplexity / ChatGPT-style user interface** with a collapsible left sidebar, dynamic workspaces, real-time trace indicators, and live execution logs.
 
-## Quick Start
+---
 
-### 1. Installation
-Clone the repository and install dependencies:
+## 🚫 Proprietary License Warning
+This repository is published under a proprietary license. While the source code is public for educational review and discovery purposes, **copying, cloning, distributing, modifications, or commercial reuse of this software is strictly prohibited** without prior written consent. Refer to the [LICENSE](LICENSE) file for the full terms.
+
+---
+
+## Architecture & Project Structure
+- `app.py`: Main entry point (NiceGUI launcher script running on port `8085`).
+- `khabrichacha/core/`: Simpler orchestrator and planner engine.
+- `khabrichacha/llm/`: Unified LLM adapter supporting OpenAI, OpenRouter, Gemini, Ollama, and local Hugging Face Models.
+- `khabrichacha/tools/`: Extensible tools registry (web search, JS rendering, page fetching, PDF parsing).
+- `khabrichacha/ui/`: ChatGPT/Perplexity collapsible layout, pages, callbacks, and theme styling built on NiceGUI.
+- `deployment/runtime/`: The research engine - classifies each query (FAST, LOOKUP, STRUCTURED, COMPARISON, ANALYSIS, RESEARCH, DEEP_RESEARCH) and runs target pipelines.
+- `deployment/workspace/`: On-disk project storage, caching, and asset management.
+- `deployment/reporting/`: Converts research outcomes into ReportLab PDF, Docx, Markdown, and JSON.
+
+---
+
+## Installation & Setup
+
+### 1. Requirements & Dependencies
+Clone the repository and install the dependencies:
 ```bash
 pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 2. Set up a free local model (recommended) — or use an API key
-**Local, free, no API key (recommended):** install [Ollama](https://ollama.com),
-then pull a small model:
-```bash
-ollama pull qwen2.5:3b
-```
-The app will automatically detect it once Ollama is running.
+### 2. Configure Local Models (Free & Local)
+Install [Ollama](https://ollama.com). Start the Ollama service, then pull the recommended models:
 
-**Optional — better relevance filtering:** pull a small embedding model too:
-```bash
-ollama pull nomic-embed-text
-```
-This lets the research pipeline recognize genuinely relevant sources that
-are worded differently from your question (paraphrases, synonyms) instead
-of relying on keyword overlap alone. It's auto-detected with no extra
-configuration; if it isn't pulled, everything still works using keyword-
-based relevance matching.
+- **Fast Router Model (LLM-1):**
+  ```bash
+  ollama pull qwen2.5:0.5b
+  ```
+- **Reasoning & Synthesis Model (LLM-2):**
+  ```bash
+  ollama pull qwen2.5:3b
+  ```
+- **Embedding Model (Optional - for high-consensus grounding):**
+  ```bash
+  ollama pull nomic-embed-text
+  ```
 
-**Or, use a hosted API instead:** set one of these as an environment
-variable — `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `OPENROUTER_API_KEY`
-(OpenRouter has several free-tier models too). API keys are read from the
-environment, not from `config.yaml`.
+*Alternatively, you can configure hosted API keys (`OPENAI_API_KEY`, `GEMINI_API_KEY`, or `OPENROUTER_API_KEY`) in your environment.*
 
-### 3. Run the UI
+### 3. Web Search METASEARCH Configuration
+By default, KhabriChacha routes search queries through public metasearch aggregator engines and DuckDuckGo. 
+The configuration is pointing to a free, public SearxNG instance `https://searx.be` in `config.yaml`, eliminating the need to set up Docker containers locally.
+
+---
+
+## Running the Application
+
+To launch the web interface:
 ```bash
 python app.py
 ```
-This starts a NiceGUI server at `http://127.0.0.1:8080`.
+This will start the local server on `http://127.0.0.1:8085`.
 
-### 4. Run on Google Colab
-See `deployment/launchers/install_colab.py` and `launch_colab.py`, or
-`colab_utils.py` for a guided setup that installs dependencies (including
-a headless browser for JS-rendered pages) and launches the UI from a
-notebook cell.
-
-### 5. Broader search coverage (optional)
-By default, web search uses DuckDuckGo, which needs no setup. For
-meaningfully broader coverage, you can self-host
-[SearxNG](https://github.com/searxng/searxng) (a metasearch engine that
-aggregates results across many search engines) with a single command:
-```bash
-docker run -d -p 8888:8888 searxng/searxng
-```
-Then set the `SEARXNG_URL` environment variable (e.g.
-`SEARXNG_URL=http://localhost:8888`) before starting the app. Results
-from SearxNG and DuckDuckGo are merged and deduplicated automatically —
-if `SEARXNG_URL` isn't set, nothing changes; DuckDuckGo alone is used.
+### Key Interface Features:
+- **Collapsible Sidebar:** Toggle the sidebar drawer via the top-left hamburger menu.
+- **"+ New Chat" Button:** Instantly starts a fresh session, clearing active cache.
+- **Projects Grid View:** Manage, load, and download past research sessions.
+- **Dual-LLM Status selectors:** Swap LLM-1 and LLM-2 models on the fly in the header.
